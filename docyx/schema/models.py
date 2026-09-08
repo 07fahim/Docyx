@@ -13,6 +13,23 @@ class PageStatus(str, Enum):
     FAILED = "failed"
 
 
+class Typography(BaseModel):
+    """Span-level type information, carried verbatim from the PDF text layer.
+
+    ``font_size`` is in points (the unit the PDF authors in), not the 150 DPI
+    reference pixels used for geometry.
+
+    ``flags`` is the PyMuPDF span bitfield:
+    bit 0 superscript, 1 italic, 2 serif, 3 monospace, 4 bold.
+    ``color`` is packed sRGB (``0xRRGGBB``).
+    """
+
+    font_family: Optional[str] = None
+    font_size: Optional[float] = None
+    flags: Optional[int] = None
+    color: Optional[int] = None
+
+
 class Element(BaseModel):
     id: str
     type: str
@@ -20,6 +37,7 @@ class Element(BaseModel):
     confidence: Confidence
     provenance: Provenance
     text: Optional[str] = None
+    typography: Optional[Typography] = None
 
 
 class Page(BaseModel):
