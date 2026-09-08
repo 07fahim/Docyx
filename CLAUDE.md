@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 No build step, no packaging (`pyproject.toml` does not exist). Run everything through the venv interpreter:
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q            # full suite (19 tests, ~1s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (~65 tests, ~2s)
+.venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.2.json after a schema change
+.venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
 ```
 
@@ -15,7 +17,7 @@ There is no linter or formatter configured. `requirements.txt` omits `pydantic`,
 
 ## Architecture
 
-Page-level PDF metadata extraction. One PDF in → one `Document` (schema v1.1) out, a list of `Page`s each holding `Element`s.
+Page-level PDF metadata extraction. One PDF in → one `Document` (schema v1.2) out, a list of `Page`s each holding `Element`s.
 
 The whole design turns on one decoupling: **the text-layer gate decides whether a page produces valid output, but never blocks rendering or visual detection.** [pipeline/extractor.py](docyx/pipeline/extractor.py) is where this is enforced — read it first. Per page, in order:
 
@@ -55,6 +57,20 @@ Table structure lives in `Element.children`: a `table` holds `table_cell` childr
 Only `text` elements are numbered (`ORDERABLE_TYPES` in [reading_order.py](docyx/analysis/reading_order.py)). Containers — `layout_region`, `table` — and cells get `reading_order: None`, because numbering a table alongside the text inside it interleaves a box with its own contents. All elements are still returned geometrically sorted.
 
 The sort is a raster sort on `(y, x)`, **not** an XY-cut despite what earlier docstrings claimed: multi-column pages interleave their columns line by line. Upgrading to a recursive projection-profile split is the known path.
+
+### The schema is a published contract
+
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. `v1.1.json` is kept as the record of what the phase branches emit; `v1.2.json` is current (warnings became structured `PageIssue` records).
+
+`PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
+
+### The text-layer gate has two stages
+
+Presence, then quality (§18.3). A page with a text layer that decodes badly — subsetted fonts, no usable ToUnicode — still *passes* (its text is returned) but carries a `TEXT_LAYER_SUSPECT` warning that degrades it to `partial`. The heuristic measures the share of `U+FFFD` and private-use-area characters; `suspect_ratio` is the knob. It is validated against unit cases and a faked reader only — PyMuPDF's writer sanitizes unmappable codepoints on insert, so a real garbled fixture cannot be synthesized in-process.
+
+### Markdown export doubles as an evaluation instrument
+
+[docyx/export/markdown.py](docyx/export/markdown.py) reconstructs prose from the page representation. Scrambled output is the fastest available signal that reading order is wrong — which is why `test_two_column_page_reads_down_each_column` is a **strict xfail**: it documents the target behaviour and flips to passing when reading order learns column detection. Headings are inferred from font size because layout classification is still a stub; a real layout model's types should take precedence when one lands.
 
 ### Known gaps
 
