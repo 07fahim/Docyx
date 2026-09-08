@@ -51,7 +51,7 @@ def test_element_ids_are_stable_and_unique(tmp_path):
     ids = [el.id for el in DocyxPipeline().process(str(pdf_path), "d").pages[0].elements]
     assert len(ids) == len(set(ids))
     # Pinned exactly: any reintroduction of a hash-derived suffix breaks this.
-    assert ids == ["page1_b0_l0_s0", "page1_b1_l0_s0"]
+    assert ids == ["page1_b0_l0", "page1_b1_l0"]
 
 
 def test_pipeline_gate_failure(tmp_path):
