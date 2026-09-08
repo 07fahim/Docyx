@@ -1,13 +1,14 @@
-import fitz
-from typing import Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 from docyx.analysis.layout import LayoutAnalyzer
 from docyx.analysis.reading_order import ReadingOrderCalculator
 from docyx.analysis.tables import TableAnalyzer
+from docyx.analysis.visual import VisualAnalyzer
+from docyx.core.constants import SCALE
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pdf.text_extractor import NativeTextExtractor
 from docyx.pipeline.gate import TextLayerGate
-from docyx.schema.models import Document, Page, PageStatus
+from docyx.schema.models import Document, Element, Page, PageStatus
 
 
 class DocyxPipeline:
@@ -15,50 +16,83 @@ class DocyxPipeline:
         self,
         layout_analyzer: Optional[LayoutAnalyzer] = None,
         table_analyzer: Optional[TableAnalyzer] = None,
+        visual_analyzer: Optional[VisualAnalyzer] = None,
     ):
         self.gate = TextLayerGate()
         self.layout_analyzer = layout_analyzer or LayoutAnalyzer()
         self.table_analyzer = table_analyzer or TableAnalyzer()
+        self.visual_analyzer = visual_analyzer or VisualAnalyzer()
 
     def process(self, file_path_or_stream: Union[str, bytes], document_id: str) -> Document:
         renderer = PDFRenderer(file_path_or_stream)
-        extractor = NativeTextExtractor(renderer.doc)
-        doc_model = Document(document_id=document_id, pages=[])
+        try:
+            extractor = NativeTextExtractor(renderer.doc)
+            doc_model = Document(document_id=document_id, pages=[])
 
-        for page_num in range(len(renderer.doc)):
-            gate_result = self.gate.check_page(file_path_or_stream, page_num)
+            for page_num in range(len(renderer.doc)):
+                doc_model.pages.append(self._process_page(renderer, extractor, page_num))
 
-            # Render page image unconditionally — layout/table detection never depends on the gate.
-            image_bytes = renderer.render_page(page_num)
+            return doc_model
+        finally:
+            renderer.close()
 
-            # Visual detection runs on every page regardless of the gate outcome.
-            layout_elements = self.layout_analyzer.analyze(image_bytes, page_num=page_num)
-            table_elements = self.table_analyzer.analyze(image_bytes, page_num=page_num)
+    def _process_page(
+        self, renderer: PDFRenderer, extractor: NativeTextExtractor, page_num: int
+    ) -> Page:
+        gate_result = self.gate.check_page(renderer.doc, page_num)
 
-            fitz_page = renderer.doc[page_num]
-            width = int(fitz_page.rect.width * (150 / 72))
-            height = int(fitz_page.rect.height * (150 / 72))
+        # Render unconditionally — visual detection never depends on the gate.
+        image_bytes = renderer.render_page(page_num)
 
-            if gate_result.passed:
-                elements = extractor.extract_page(page_num) + layout_elements + table_elements
-                elements = ReadingOrderCalculator.calculate(elements)
-                page_model = Page(
-                    page_number=page_num + 1,
-                    status=PageStatus.OK,
-                    width=width,
-                    height=height,
-                    elements=elements,
-                )
-            else:
-                page_model = Page(
-                    page_number=page_num + 1,
-                    status=PageStatus.FAILED,
-                    width=width,
-                    height=height,
-                    errors=[gate_result.error.model_dump_json()],
-                    diagnostic_elements=layout_elements + table_elements,
-                )
+        # Detection runs on every page regardless of the gate outcome. A single
+        # detector blowing up must not cost us the rest of the page.
+        warnings: List[str] = []
+        detected: List[Element] = []
+        for stage, run in (
+            ("layout_detection", self.layout_analyzer.analyze),
+            ("table_detection", self.table_analyzer.analyze),
+            ("visual_detection", self.visual_analyzer.analyze),
+        ):
+            elements, warning = _safely(stage, run, image_bytes, page_num)
+            detected.extend(elements)
+            if warning:
+                warnings.append(warning)
 
-            doc_model.pages.append(page_model)
+        rect = renderer.doc[page_num].rect
+        width = int(rect.width * SCALE)
+        height = int(rect.height * SCALE)
 
-        return doc_model
+        if not gate_result.passed:
+            return Page(
+                page_number=page_num + 1,
+                status=PageStatus.FAILED,
+                width=width,
+                height=height,
+                errors=[gate_result.error],
+                warnings=warnings,
+                diagnostic_elements=detected,
+            )
+
+        elements = ReadingOrderCalculator.calculate(extractor.extract_page(page_num) + detected)
+        return Page(
+            page_number=page_num + 1,
+            # Text came through, but a detector dropped out — the page is usable
+            # yet incomplete, which is exactly what PARTIAL is for.
+            status=PageStatus.PARTIAL if warnings else PageStatus.OK,
+            width=width,
+            height=height,
+            warnings=warnings,
+            elements=elements,
+        )
+
+
+def _safely(
+    stage: str,
+    run: Callable[..., List[Element]],
+    image_bytes: bytes,
+    page_num: int,
+) -> Tuple[List[Element], Optional[str]]:
+    try:
+        return run(image_bytes, page_num=page_num), None
+    except Exception as exc:  # a detector failure degrades the page, never the document
+        return [], f"{stage} failed: {exc}"

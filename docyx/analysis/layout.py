@@ -1,10 +1,11 @@
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
 from docyx.schema.models import Element
 
-Detector = Callable[[bytes], List[BoundingBox]]
+# A detector returns one (box, model score) pair per detection.
+Detector = Callable[[bytes], List[Tuple[BoundingBox, float]]]
 
 
 class LayoutAnalyzer:
@@ -23,18 +24,22 @@ class LayoutAnalyzer:
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
         boxes = self._detector(image_bytes) if self._detector else self._heuristic(image_bytes)
         elements = []
-        for idx, box in enumerate(boxes):
+        for idx, (box, score) in enumerate(boxes):
             elements.append(
                 Element(
                     id=f"page{page_num + 1}_layout_{idx}",
                     type="layout_region",
                     geometry=Geometry(bbox=box),
-                    confidence=Confidence(value=0.0, type=ConfidenceType.DETECTED),
-                    provenance=Provenance(source=ProvenanceSource.LAYOUT_MODEL, engine=self.ENGINE),
+                    confidence=Confidence(value=score, type=ConfidenceType.DETECTED),
+                    provenance=Provenance(
+                        source=ProvenanceSource.LAYOUT_MODEL,
+                        engine=self.ENGINE,
+                        raw_confidence=score,
+                    ),
                 )
             )
         return elements
 
     @staticmethod
-    def _heuristic(image_bytes: bytes) -> List[BoundingBox]:
+    def _heuristic(image_bytes: bytes) -> List[Tuple[BoundingBox, float]]:
         return []

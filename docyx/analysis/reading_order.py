@@ -2,14 +2,23 @@ from typing import List
 
 from docyx.schema.models import Element
 
+# Only these carry a reading position. Containers (`layout_region`, `table`) and
+# contained cells are deliberately excluded — numbering a table alongside the
+# text inside it interleaves a box with its own contents.
+ORDERABLE_TYPES = frozenset({"text"})
+
 
 class ReadingOrderCalculator:
-    """Assigns reading order to elements using an XY-cut geometric sort.
+    """Assigns reading order to the text layer of a page.
 
-    Elements are ordered top-to-bottom, then left-to-right, based on their
-    bounding boxes in the canonical 150 DPI coordinate system. The sort is
-    deterministic and only meaningful for elements on pages whose text layer
-    passed the gate.
+    ponytail: raster sort on (y, x) in the canonical 150 DPI system — top to
+    bottom, ties left to right. This is NOT an XY-cut: a multi-column page
+    interleaves its columns line by line. Upgrade to a real XY-cut (recursive
+    projection-profile splitting) when multi-column documents matter.
+
+    Elements are returned sorted geometrically so page output is stable, but
+    only ``ORDERABLE_TYPES`` receive a ``reading_order`` number; everything else
+    keeps ``None``.
     """
 
     @staticmethod
@@ -18,6 +27,11 @@ class ReadingOrderCalculator:
             elements,
             key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x),
         )
-        for idx, element in enumerate(ordered, start=1):
-            element.reading_order = idx
+        position = 0
+        for element in ordered:
+            if element.type in ORDERABLE_TYPES:
+                position += 1
+                element.reading_order = position
+            else:
+                element.reading_order = None
         return ordered
