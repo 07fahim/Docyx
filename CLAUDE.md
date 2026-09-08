@@ -60,9 +60,21 @@ Extraction is at **line** granularity (§5), not span. `NativeTextExtractor` joi
 
 Only `text` elements are numbered (`ORDERABLE_TYPES` in [reading_order.py](docyx/analysis/reading_order.py)). Containers — `layout_region`, `table` — and cells get `reading_order: None`, because numbering a table alongside the text inside it interleaves a box with its own contents. All elements are still returned geometrically sorted.
 
-Elements are grouped into horizontal **bands** by vertical overlap, then sorted left to right within each band. Raw `(y, x)` was too literal: a bold run-in heading has a different ascender, so its bbox `y` is fractionally larger than the paragraph it introduces, and exact comparison ordered it second.
+Recursive **XY-cut** ([reading_order.py](docyx/analysis/reading_order.py)). A block is cut along blank channels: columns first, since a column runs top-to-bottom before the next begins. A full-width heading or figure caption blocks the vertical cut, which forces a horizontal cut and so keeps it above the columns beneath. Blocks that resist cutting fall back to **banding** — group by vertical overlap, read left to right — which keeps a bold run-in heading ahead of its paragraph despite a fractionally higher bbox.
 
-Banding is still **not** an XY-cut — multi-column pages interleave, since both columns occupy the same bands. `test_two_column_page_reads_down_each_column` is a strict xfail tracking that; recursive projection-profile splitting is the known path.
+Cuts use text elements only: a full-width rule would otherwise bridge the gutter and defeat every column cut on the page.
+
+Three guards, each added because removing it regressed a measured case:
+
+| Guard | Why |
+|---|---|
+| `MIN_COLUMN_HEIGHT_RATIO` 0.5 | A gutter is a channel running *down* a block. Two isolated lines at different heights otherwise look like columns. |
+| `MIN_COLUMN_WIDTH_RATIO` 0.25 | Table columns are narrow. Without this, a results table reads downwards — cost 64 points on one GPT-3 page. 0.25 not 0.30 so three-column layouts survive. |
+| `ROW_GAP_FACTOR` 1.5, widest gap only | Cutting at *every* gap shatters a two-column body into strips that each still hold both columns. |
+
+Measured against PyMuPDF's own reading order across 8 real documents: **71.6% → 86.0%** mean agreement, +37% on the two-column paper. Re-run that sweep before touching the thresholds.
+
+Still geometric only: an RTL page reads its columns in the wrong order (needs `direction`, unpopulated).
 
 ### The schema is a published contract
 

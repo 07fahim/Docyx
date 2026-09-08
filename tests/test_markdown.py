@@ -170,13 +170,9 @@ def test_empty_document_does_not_crash():
     assert to_markdown(Document(document_id="d", pages=[])).strip() == ""
 
 
-@pytest.mark.xfail(
-    reason="Reading order is a raster sort on (y, x), not an XY-cut, so columns "
-    "interleave line by line. This test documents the target behaviour and will "
-    "pass once ReadingOrderCalculator does real column detection.",
-    strict=True,
-)
 def test_two_column_page_reads_down_each_column(tmp_path):
+    """Was an xfail while reading order was a raster sort. The XY-cut finds the
+    gutter, so each column is now read top to bottom before the next begins."""
     doc = fitz.open()
     page = doc.new_page()
     left = ["Machine learning models", "require large amounts of", "carefully labelled data."]
