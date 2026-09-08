@@ -19,6 +19,7 @@ class Element(BaseModel):
     confidence: Confidence
     provenance: Provenance
     text: Optional[str] = None
+    reading_order: Optional[int] = None
 
 
 class Page(BaseModel):
