@@ -15,6 +15,19 @@ choice, so it can be revisited deliberately rather than rediscovered.
 | opencv-python-headless | >=4.8 | Apache-2.0 | Visual element detection | |
 | numpy | >=1.24 | BSD-3-Clause | Array handling for OpenCV | |
 
+### Optional model stack (`requirements-models.txt`)
+
+| Dependency | Licence | Role |
+|---|---|---|
+| torch | BSD-3-Clause | Inference runtime (CPU) |
+| transformers | Apache-2.0 | Model loading and pre/post-processing |
+| timm | Apache-2.0 | Table Transformer's backbone |
+| pillow | MIT-CMU | Image handling |
+| `microsoft/table-transformer-*` weights | **MIT** | Table detection and structure |
+
+All permissive and compatible with AGPL-3.0. Not required by the core: the
+pipeline falls back to heuristics without them.
+
 No model weights ship with the project. Layout and table detection are
 injected through the `detector` seam, so **whichever model you plug in brings
 its own licence** — that is a separate audit, and it has not been done, because

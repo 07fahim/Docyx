@@ -21,6 +21,15 @@ class LayoutAnalyzer:
     def __init__(self, detector: Optional[Detector] = None):
         self._detector = detector
 
+    def _engine(self) -> str:
+        """Provenance must name whichever engine actually produced the result.
+
+        A detector may declare its own `engine`; otherwise this is the built-in
+        heuristic. Reporting the heuristic's name for a model's output would
+        make provenance a lie and break the swappability claim (§26.11).
+        """
+        return getattr(self._detector, "engine", None) or self.ENGINE
+
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
         boxes = self._detector(image_bytes) if self._detector else self._heuristic(image_bytes)
         elements = []
@@ -33,7 +42,7 @@ class LayoutAnalyzer:
                     confidence=Confidence(value=score, type=ConfidenceType.DETECTED),
                     provenance=Provenance(
                         source=ProvenanceSource.LAYOUT_MODEL,
-                        engine=self.ENGINE,
+                        engine=self._engine(),
                         raw_confidence=score,
                     ),
                 )

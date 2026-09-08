@@ -90,6 +90,21 @@ Presence, then quality (§18.3). A page with a text layer that decodes badly —
 
 [docyx/export/markdown.py](docyx/export/markdown.py) reconstructs prose from the page representation. Scrambled output is the fastest available signal that reading order is wrong — which is why `test_two_column_page_reads_down_each_column` is a **strict xfail**: it documents the target behaviour and flips to passing when reading order learns column detection. Headings are inferred from font size because layout classification is still a stub; a real layout model's types should take precedence when one lands.
 
+### Real models (optional)
+
+`pip install -r requirements-models.txt` then inject:
+
+```python
+from docyx.analysis.detectors.table_transformer import TableTransformerDetector
+DocyxPipeline(table_analyzer=TableAnalyzer(detector=TableTransformerDetector()))
+```
+
+**Table Transformer is an object detector, not OCR** — it emits row/column/table *boxes* from the page image and never reads a character from pixels (§2.2). Cell text is joined from the native layer by position in `_populate_cell_text`, so it stays `1.0 / exact` and `ocr`/`visual_inference` remain unused. Verified on a real IRS form: 731 text elements, all `native_pdf`.
+
+The stack is optional by design — core stays at 4 light dependencies (§24). Measured ~1.5s/page on CPU after a one-off weight load.
+
+Detectors may declare an `engine` attribute; analyzers report it as `provenance.engine` instead of their own heuristic name. Attributing a model's output to the heuristic it replaced would make §26.11's swappability claim unverifiable.
+
 ### Known gaps
 
 - Reading order is single-column only (above).

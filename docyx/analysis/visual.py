@@ -57,6 +57,15 @@ class VisualAnalyzer:
         self.max_component_density = max_component_density
         self.confidence = confidence
 
+    def _engine(self) -> str:
+        """Provenance must name whichever engine actually produced the result.
+
+        A detector may declare its own `engine`; otherwise this is the built-in
+        heuristic. Reporting the heuristic's name for a model's output would
+        make provenance a lie and break the swappability claim (§26.11).
+        """
+        return getattr(self._detector, "engine", None) or self.ENGINE
+
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
         detections = (
             self._detector(image_bytes) if self._detector else self._heuristic(image_bytes)
@@ -71,7 +80,7 @@ class VisualAnalyzer:
                     confidence=Confidence(value=det.score, type=ConfidenceType.DETECTED),
                     provenance=Provenance(
                         source=ProvenanceSource.GEOMETRY_INFERENCE,
-                        engine=self.ENGINE,
+                        engine=self._engine(),
                         raw_confidence=det.score,
                     ),
                 )

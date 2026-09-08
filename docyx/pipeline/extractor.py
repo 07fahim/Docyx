@@ -48,7 +48,7 @@ class DocyxPipeline:
         # Detection runs on every page regardless of the gate outcome. A single
         # detector blowing up must not cost us the rest of the page.
         warnings: List[PageIssue] = []
-        # The text layer may be present but garbled (§18.3) — that is a warning
+        # The text layer may be present but garbled (Â§18.3) â€” that is a warning
         # on an otherwise usable page, not a gate failure.
         if gate_result.warning:
             warnings.append(gate_result.warning)
@@ -80,6 +80,7 @@ class DocyxPipeline:
             )
 
         elements = ReadingOrderCalculator.calculate(extractor.extract_page(page_num) + detected)
+        _populate_cell_text(elements)
         return Page(
             page_number=page_num + 1,
             # Text came through, but a detector dropped out â€” the page is usable
@@ -102,3 +103,41 @@ def _safely(
         return run(image_bytes, page_num=page_num), None
     except Exception as exc:  # a detector failure degrades the page, never the document
         return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))
+
+
+def _populate_cell_text(elements: List[Element]) -> None:
+    """Fill detected table cells with the native text falling inside them.
+
+    A table model produces geometry only - it has no idea what the cells say,
+    and it never reads pixels as text. The native text layer stays the sole
+    authority for content, so the two are joined by position: a line belongs to
+    the cell containing its centre. That keeps cell text at confidence 1.0 /
+    exact, and keeps the no-OCR contract intact.
+
+    Lines stay in `elements` as well as in the cell. The table is a container
+    view over the same content, not a replacement, and removing them would
+    strip them out of reading order.
+    """
+    cells = [
+        cell
+        for element in elements
+        if element.type == "table"
+        for cell in element.children
+        if cell.type == "table_cell"
+    ]
+    if not cells:
+        return
+
+    lines = [el for el in elements if el.type == "text" and el.text]
+    for cell in cells:
+        box = cell.geometry.bbox
+        inside = [
+            line
+            for line in lines
+            if box.contains(
+                line.geometry.bbox.x + line.geometry.bbox.width / 2,
+                line.geometry.bbox.y + line.geometry.bbox.height / 2,
+            )
+        ]
+        inside.sort(key=lambda el: (el.reading_order is None, el.reading_order or 0))
+        cell.text = " ".join(line.text.strip() for line in inside) or None

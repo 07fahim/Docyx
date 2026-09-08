@@ -1,0 +1,15 @@
+# Optional model backends for the analyzer detector seams.
+#
+# The core pipeline does NOT need these — analyzers fall back to heuristics
+# without them, which keeps §24's resource-lightness intact. Install only when
+# you want real layout/table detection.
+#
+#   pip install -r requirements.txt -r requirements-models.txt
+#
+# CPU-only torch is enough; no GPU is required. For a smaller download:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.0
+transformers>=4.40
+timm>=0.9          # Table Transformer's backbone
+pillow>=10.0       # image handling for the processors
