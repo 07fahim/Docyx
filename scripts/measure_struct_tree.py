@@ -54,6 +54,22 @@ def _get(doc: fitz.Document, xref: int, key: str) -> Optional[str]:
     return None if kind == "null" else value
 
 
+def _get_resolved(doc: fitz.Document, xref: int, key: str) -> Optional[str]:
+    """Like _get, but follows one level of indirection.
+
+    Real files routinely store /Lang as an indirect reference, which _get
+    returns verbatim as '2396 0 R' rather than the string it points at.
+    """
+    value = _get(doc, xref, key)
+    if value is None:
+        return None
+    target = _resolve(doc, value)
+    if target is None:
+        return value
+    resolved = doc.xref_object(target, compressed=True)
+    return resolved.strip().lstrip("(").rstrip(")").strip() or None
+
+
 def _walk_types(doc: fitz.Document, xref: int, counter: Counter, depth: int = 0, seen=None):
     """Collect /S structure types by walking /K children."""
     if depth > 40:  # cycle / pathological nesting guard
@@ -103,7 +119,7 @@ def inspect(path: Path) -> Dict[str, Any]:
             )
             result["marked"] = str(marked).lower() == "true"
 
-        result["lang"] = _get(doc, catalog, "Lang")
+        result["lang"] = _get_resolved(doc, catalog, "Lang")
 
         types: Counter = Counter()
         if "StructTreeRoot" in keys:

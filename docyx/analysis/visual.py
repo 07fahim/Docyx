@@ -40,6 +40,7 @@ class VisualAnalyzer:
         min_rule_ratio: float = 0.25,
         max_rule_thickness: float = 12.0,
         min_figure_area_ratio: float = 0.02,
+        max_component_density: float = 20.0,
         confidence: float = 0.5,
     ):
         self._detector = detector
@@ -49,6 +50,11 @@ class VisualAnalyzer:
         # 12px at 150 DPI is roughly a 6pt stroke.
         self.max_rule_thickness = max_rule_thickness
         self.min_figure_area_ratio = min_figure_area_ratio
+        # Connected components per 10k px, measured before the closing that
+        # merges a region. Text shatters into one component per glyph; figures
+        # do not. Measured on real documents: text-only pages bottom out around
+        # 27-39, while genuine figures sit near 10. 20 splits them.
+        self.max_component_density = max_component_density
         self.confidence = confidence
 
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
@@ -126,8 +132,21 @@ class VisualAnalyzer:
             # A block that is really just a thick rule is already reported as one.
             if any(_iou(box, rb) > 0.5 for rb in rule_boxes):
                 continue
+            # Closing merges a paragraph into one blob that looks exactly like a
+            # figure by shape alone. Ask the *unclosed* ink how fragmented it is:
+            # text is one component per glyph, a figure is not.
+            if _component_density(ink[y : y + ch, x : x + cw]) > self.max_component_density:
+                continue
             out.append(VisualDetection(bbox=box, kind="figure", score=self.confidence))
         return out
+
+
+def _component_density(region: np.ndarray) -> float:
+    """Connected components per 10k pixels."""
+    if region.size == 0:
+        return 0.0
+    count = cv2.connectedComponents(region)[0]
+    return count / (region.size / 10000.0)
 
 
 def _iou(a: BoundingBox, b: BoundingBox) -> float:
