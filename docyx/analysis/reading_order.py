@@ -1,6 +1,6 @@
 from typing import List, Sequence, Tuple
 
-from docyx.schema.models import Element
+from docyx.schema.models import Direction, Element
 
 # Only these carry a reading position. Containers (`layout_region`, `table`) and
 # contained cells are deliberately excluded — numbering a table alongside the
@@ -97,6 +97,9 @@ def _xy_cut(
     # produce left, right, left, right instead.
     columns = _split(elements, min_gutter, horizontal=True)
     if len(columns) > 1 and _are_columns(elements, columns):
+        # Right-to-left text puts the first column on the right.
+        if _is_rtl(elements):
+            columns.reverse()
         return [el for col in columns for el in _xy_cut(col, min_gutter, min_row_gap, depth + 1)]
 
     # Only the single widest boundary, not every gap. Cutting at all of them
@@ -107,6 +110,17 @@ def _xy_cut(
         return [el for row in rows for el in _xy_cut(row, min_gutter, min_row_gap, depth + 1)]
 
     return _banded(elements)
+
+
+def _is_rtl(elements: List[Element]) -> bool:
+    """Does this block read right to left?
+
+    Uses the direction extraction reports from the PDF (§13) rather than
+    guessing from geometry. Mixed-direction pages resolve per block, which is
+    the point of tracking direction per element instead of per page.
+    """
+    rtl = sum(1 for el in elements if el.direction is Direction.RTL)
+    return rtl * 2 > len(elements)
 
 
 def _widest_row_cut(elements: List[Element], min_row_gap: float):

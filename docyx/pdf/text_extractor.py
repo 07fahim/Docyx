@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from docyx.core.constants import SCALE
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
-from docyx.schema.models import Element, Typography
+from docyx.schema.models import Direction, Element, Typography
 
 
 class NativeTextExtractor:
@@ -55,6 +55,7 @@ class NativeTextExtractor:
                     provenance=Provenance(source=ProvenanceSource.NATIVE_PDF, engine="PyMuPDF"),
                     text=text,
                     typography=_dominant_typography(spans),
+                    direction=_direction(line, spans),
                 )
                 elements.append(element)
         return elements
@@ -89,3 +90,23 @@ def _dominant_typography(spans: List[Dict[str, Any]]) -> Optional[Typography]:
         flags=span.get("flags"),
         color=span.get("color"),
     )
+
+
+def _direction(line: Dict[str, Any], spans: List[Dict[str, Any]]) -> Direction:
+    """Writing direction, read from the PDF rather than inferred (§13).
+
+    The line's ``dir`` is a unit vector: (1, 0) for ordinary horizontal text,
+    (0, +/-1) once the text is set vertically. The span's ``bidi`` is a
+    bidirectional embedding level, and odd levels are right-to-left.
+    """
+    dx, dy = line.get("dir", (1.0, 0.0))
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return Direction.UNKNOWN
+    if abs(dy) > abs(dx):
+        return Direction.TTB
+
+    scoring = [s for s in spans if s.get("text", "").strip()]
+    if not scoring:
+        return Direction.UNKNOWN
+    dominant = max(scoring, key=lambda s: len(s.get("text", "").strip()))
+    return Direction.RTL if int(dominant.get("bidi", 0)) % 2 else Direction.LTR

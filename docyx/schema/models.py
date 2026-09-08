@@ -7,6 +7,23 @@ from docyx.core.metadata import Confidence, Provenance
 from docyx.schema.errors import PageIssue
 
 
+class Direction(str, Enum):
+    """Writing direction of a text element (§13).
+
+    Tracked per element, not per page: a page may mix directions, and forcing
+    one global direction on it loses that. Read from the PDF itself — the line's
+    direction vector and the span's bidi level — so it is exact, never guessed.
+
+    Per-element *language* is deliberately absent: PDFs carry no such field, so
+    populating it would mean detection, which could not honestly be `exact`.
+    """
+
+    LTR = "ltr"
+    RTL = "rtl"
+    TTB = "ttb"
+    UNKNOWN = "unknown"
+
+
 class PageStatus(str, Enum):
     OK = "ok"
     PARTIAL = "partial"
@@ -48,6 +65,7 @@ class Element(BaseModel):
     text: Optional[str] = None
     reading_order: Optional[int] = None
     typography: Optional[Typography] = None
+    direction: Optional[Direction] = None
     # Set on `table_cell` elements only; None everywhere else.
     grid: Optional[GridPosition] = None
     # Containment. A `table` holds its `table_cell` children here.
@@ -70,6 +88,6 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.2"
+    schema_version: str = "1.3"
     document_id: str
     pages: List[Page] = Field(default_factory=list)
