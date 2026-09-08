@@ -8,6 +8,17 @@ class BoundingBox(BaseModel):
     width: float
     height: float
 
+    @property
+    def x1(self) -> float:
+        return self.x + self.width
+
+    @property
+    def y1(self) -> float:
+        return self.y + self.height
+
+    def contains(self, px: float, py: float) -> bool:
+        return self.x <= px <= self.x1 and self.y <= py <= self.y1
+
 
 class Point(BaseModel):
     x: float
