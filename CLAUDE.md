@@ -52,11 +52,17 @@ Every analyzer takes an optional `detector` and falls back to a stub returning `
 
 Table structure lives in `Element.children`: a `table` holds `table_cell` children, each with a `grid` (`row`, `column`, `row_span`, `column_span`). `cells` may be empty when a detector finds the outline but cannot resolve structure.
 
+### Text granularity
+
+Extraction is at **line** granularity (§5), not span. `NativeTextExtractor` joins a line's spans back together — PyMuPDF emits inter-word gaps as their own spans, so plain concatenation reproduces the line exactly, which is why blank spans must **not** be skipped. Per-span extraction split lines at every inline citation and superscript, and those fragments then scattered during ordering. Typography is taken from the longest span so a leading superscript can't misreport the line. Verified across 469k characters of real PDFs: the character multiset matches PyMuPDF's own extraction exactly.
+
 ### Reading order
 
 Only `text` elements are numbered (`ORDERABLE_TYPES` in [reading_order.py](docyx/analysis/reading_order.py)). Containers — `layout_region`, `table` — and cells get `reading_order: None`, because numbering a table alongside the text inside it interleaves a box with its own contents. All elements are still returned geometrically sorted.
 
-The sort is a raster sort on `(y, x)`, **not** an XY-cut despite what earlier docstrings claimed: multi-column pages interleave their columns line by line. Upgrading to a recursive projection-profile split is the known path.
+Elements are grouped into horizontal **bands** by vertical overlap, then sorted left to right within each band. Raw `(y, x)` was too literal: a bold run-in heading has a different ascender, so its bbox `y` is fractionally larger than the paragraph it introduces, and exact comparison ordered it second.
+
+Banding is still **not** an XY-cut — multi-column pages interleave, since both columns occupy the same bands. `test_two_column_page_reads_down_each_column` is a strict xfail tracking that; recursive projection-profile splitting is the known path.
 
 ### The schema is a published contract
 
@@ -75,7 +81,7 @@ Presence, then quality (§18.3). A page with a text layer that decodes badly —
 ### Known gaps
 
 - Reading order is single-column only (above).
-- `figure` detection is a contour heuristic and will merge dense text into blocks on some layouts; rules are reliable. Inject a real figure head via `detector` when precision matters.
+- `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - No OCR, per v1 scope. `ocr` / `visual_inference` provenance and `inferred` confidence stay unused until phase 6.
 
 ## Planning docs
