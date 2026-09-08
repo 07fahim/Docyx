@@ -1,0 +1,5 @@
+PyMuPDF>=1.23.0
+pdfplumber>=0.10.0
+pikepdf>=8.0.0
+layoutparser>=0.3.4
+opencv-python-headless>=4.8.0
