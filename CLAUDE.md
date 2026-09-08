@@ -105,6 +105,12 @@ Presence, then quality (§18.3). A page with a text layer that decodes badly —
 
 `AGENTS.md` is **stale** — it claims the repo is planning-only with no code. Its v1 scope constraints and architecture notes are still accurate; ignore the "no code yet" framing.
 
+## Licensing
+
+**AGPL-3.0** (`LICENSE`), because PyMuPDF is AGPL-or-commercial and the project's stated differentiator is open-source self-hosted operation. See [LICENSING.md](LICENSING.md) for the dependency inventory and what the choice forecloses — notably a proprietary hosted API or closed enterprise deployment, both of which appear in §24's commercialization sketch.
+
+PyMuPDF is confined to [docyx/pdf/](docyx/pdf/); everything outside depends on the protocols in [docyx/pdf/protocols.py](docyx/pdf/protocols.py). **Keep it that way** — that containment is what makes the licence decision reversible for the cost of one package. Any injected layout/table model brings its own licence; that audit is still outstanding.
+
 ## v1 scope limits (non-negotiable)
 
 PDF-only input, reject non-PDF at upload. No OCR, no model weights for OCR, no GPU. Requires a machine-readable text layer for `ok` status.

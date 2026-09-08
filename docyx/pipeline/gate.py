@@ -1,8 +1,8 @@
 from typing import Optional
 
-import fitz
 from pydantic import BaseModel
 
+from docyx.pdf.protocols import TextDocument
 from docyx.schema.errors import PageIssue
 
 # Codepoints that indicate the text layer decoded badly rather than the document
@@ -55,7 +55,7 @@ class TextLayerGate:
     def __init__(self, suspect_ratio: float = 0.10):
         self.suspect_ratio = suspect_ratio
 
-    def check_page(self, doc: fitz.Document, page_num: int) -> GateResult:
+    def check_page(self, doc: TextDocument, page_num: int) -> GateResult:
         text = doc[page_num].get_text("text")
         if not text.strip():
             return GateResult(
