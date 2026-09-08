@@ -8,6 +8,7 @@ from docyx.core.constants import SCALE
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pdf.text_extractor import NativeTextExtractor
 from docyx.pipeline.gate import TextLayerGate
+from docyx.schema.errors import PageIssue
 from docyx.schema.models import Document, Element, Page, PageStatus
 
 
@@ -46,7 +47,12 @@ class DocyxPipeline:
 
         # Detection runs on every page regardless of the gate outcome. A single
         # detector blowing up must not cost us the rest of the page.
-        warnings: List[str] = []
+        warnings: List[PageIssue] = []
+        # The text layer may be present but garbled (§18.3) — that is a warning
+        # on an otherwise usable page, not a gate failure.
+        if gate_result.warning:
+            warnings.append(gate_result.warning)
+
         detected: List[Element] = []
         for stage, run in (
             ("layout_detection", self.layout_analyzer.analyze),
@@ -91,8 +97,8 @@ def _safely(
     run: Callable[..., List[Element]],
     image_bytes: bytes,
     page_num: int,
-) -> Tuple[List[Element], Optional[str]]:
+) -> Tuple[List[Element], Optional[PageIssue]]:
     try:
         return run(image_bytes, page_num=page_num), None
     except Exception as exc:  # a detector failure degrades the page, never the document
-        return [], f"{stage} failed: {exc}"
+        return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))

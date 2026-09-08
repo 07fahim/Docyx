@@ -1,0 +1,459 @@
+{
+  "$defs": {
+    "BoundingBox": {
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "width": {
+          "title": "Width",
+          "type": "number"
+        },
+        "height": {
+          "title": "Height",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "Confidence": {
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "type": {
+          "$ref": "#/$defs/ConfidenceType"
+        }
+      },
+      "required": [
+        "value",
+        "type"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "ConfidenceType": {
+      "enum": [
+        "exact",
+        "detected",
+        "inferred"
+      ],
+      "title": "ConfidenceType",
+      "type": "string"
+    },
+    "Element": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "geometry": {
+          "$ref": "#/$defs/Geometry"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "reading_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reading Order"
+        },
+        "typography": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Typography"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GridPosition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/Element"
+          },
+          "title": "Children",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "geometry",
+        "confidence",
+        "provenance"
+      ],
+      "title": "Element",
+      "type": "object"
+    },
+    "GateError": {
+      "description": "Structured error record attached to a page when a pipeline stage fails.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "message"
+      ],
+      "title": "GateError",
+      "type": "object"
+    },
+    "Geometry": {
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "polygon": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Point"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Polygon"
+        },
+        "rotation": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rotation"
+        }
+      },
+      "required": [
+        "bbox"
+      ],
+      "title": "Geometry",
+      "type": "object"
+    },
+    "GridPosition": {
+      "description": "Where a cell sits in its table. Zero-indexed from the top-left.",
+      "properties": {
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        },
+        "column": {
+          "title": "Column",
+          "type": "integer"
+        },
+        "row_span": {
+          "default": 1,
+          "title": "Row Span",
+          "type": "integer"
+        },
+        "column_span": {
+          "default": 1,
+          "title": "Column Span",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "column"
+      ],
+      "title": "GridPosition",
+      "type": "object"
+    },
+    "Page": {
+      "properties": {
+        "page_number": {
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/PageStatus"
+        },
+        "width": {
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "title": "Height",
+          "type": "integer"
+        },
+        "source_type": {
+          "default": "born_digital",
+          "title": "Source Type",
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/GateError"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "elements": {
+          "items": {
+            "$ref": "#/$defs/Element"
+          },
+          "title": "Elements",
+          "type": "array"
+        },
+        "diagnostic_elements": {
+          "items": {
+            "$ref": "#/$defs/Element"
+          },
+          "title": "Diagnostic Elements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "page_number",
+        "status",
+        "width",
+        "height"
+      ],
+      "title": "Page",
+      "type": "object"
+    },
+    "PageStatus": {
+      "enum": [
+        "ok",
+        "partial",
+        "failed"
+      ],
+      "title": "PageStatus",
+      "type": "string"
+    },
+    "Point": {
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "Point",
+      "type": "object"
+    },
+    "Provenance": {
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/ProvenanceSource"
+        },
+        "engine": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Engine"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "raw_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw Confidence"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "ProvenanceSource": {
+      "enum": [
+        "native_pdf",
+        "layout_model",
+        "table_model",
+        "geometry_inference",
+        "manual",
+        "ocr",
+        "visual_inference"
+      ],
+      "title": "ProvenanceSource",
+      "type": "string"
+    },
+    "Typography": {
+      "description": "Span-level type information, carried verbatim from the PDF text layer.\n\n``font_size`` is in points (the unit the PDF authors in), not the 150 DPI\nreference pixels used for geometry.\n\n``flags`` is the PyMuPDF span bitfield:\nbit 0 superscript, 1 italic, 2 serif, 3 monospace, 4 bold.\n``color`` is packed sRGB (``0xRRGGBB``).",
+      "properties": {
+        "font_family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Family"
+        },
+        "font_size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Size"
+        },
+        "flags": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flags"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        }
+      },
+      "title": "Typography",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": "1.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "document_id": {
+      "title": "Document Id",
+      "type": "string"
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/$defs/Page"
+      },
+      "title": "Pages",
+      "type": "array"
+    }
+  },
+  "required": [
+    "document_id"
+  ],
+  "title": "Document",
+  "type": "object"
+}

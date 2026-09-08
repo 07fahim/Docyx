@@ -113,5 +113,6 @@ def test_detector_failure_degrades_page_to_partial(tmp_path):
     # Text survived, so the page is usable — but incomplete.
     assert page.status == PageStatus.PARTIAL
     assert len(page.elements) > 0
-    assert any("layout_detection failed" in w for w in page.warnings)
+    assert [w.code for w in page.warnings] == ["STAGE_FAILED"]
+    assert page.warnings[0].stage == "layout_detection"
     assert page.errors == []

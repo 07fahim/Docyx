@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from docyx.core.geometry import Geometry
 from docyx.core.metadata import Confidence, Provenance
-from docyx.schema.errors import GateError
+from docyx.schema.errors import PageIssue
 
 
 class PageStatus(str, Enum):
@@ -63,13 +63,13 @@ class Page(BaseModel):
     width: int
     height: int
     source_type: str = "born_digital"
-    errors: List[GateError] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    errors: List[PageIssue] = Field(default_factory=list)
+    warnings: List[PageIssue] = Field(default_factory=list)
     elements: List[Element] = Field(default_factory=list)
     diagnostic_elements: List[Element] = Field(default_factory=list)
 
 
 class Document(BaseModel):
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
     document_id: str
     pages: List[Page] = Field(default_factory=list)
