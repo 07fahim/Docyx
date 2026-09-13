@@ -52,8 +52,8 @@ def main() -> int:
         return 2
 
     pdf_path, page_num = sys.argv[1], int(sys.argv[2])
-    doc = DocyxPipeline().process(pdf_path, document_id=pdf_path)
-    page = doc.pages[page_num]
+    doc = DocyxPipeline().process(pdf_path, document_id=pdf_path, pages=[page_num])
+    page = doc.pages[0]
     lines = neutral_lines(page)
 
     print(f"# {pdf_path} page {page_num}")

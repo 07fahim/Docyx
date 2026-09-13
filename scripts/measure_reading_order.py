@@ -93,8 +93,10 @@ def score_page(truth: dict) -> dict:
     from scripts.dump_lines import checksum
 
     pdf = CORPUS_DIR / truth["document"]
-    doc = DocyxPipeline().process(str(pdf), document_id=truth["document"])
-    page = doc.pages[truth["page"]]
+    # Only the page under test — scoring one page of nasa_budget.pdf would
+    # otherwise cost all 807.
+    doc = DocyxPipeline().process(str(pdf), document_id=truth["document"], pages=[truth["page"]])
+    page = doc.pages[0]
     lines = neutral_lines(page)
 
     actual = checksum(lines)

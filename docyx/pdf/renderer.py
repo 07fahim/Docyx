@@ -10,6 +10,10 @@ class PDFRenderer:
         else:
             self.doc = fitz.open(stream=file_path_or_stream, filetype="pdf")
 
+    def page_count(self) -> int:
+        """Declared here so callers need not reach through to the fitz document."""
+        return len(self.doc)
+
     def render_page(self, page_num: int) -> bytes:
         return self._pixmap(page_num).tobytes("png")
 

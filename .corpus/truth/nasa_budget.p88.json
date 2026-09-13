@@ -1,0 +1,17 @@
+{
+  "document": "nasa_budget.pdf",
+  "page": 88,
+  "checksum": "af8c97f4a674",
+  "confidence": "verified by reading the cell contents",
+  "notes": "A government report page whose body is a review table with MULTI-LINE cells — the hardest ordering case in the set, and deliberately the opposite of arxiv_gpt3 p7. There the cells are single-line, so the table reads row-wise; here each cell wraps over up to ten lines, so reading row-wise shreds every sentence and the correct order is cell by cell. A tool cannot get both right from geometry alone without knowing where the cell boundaries are, which is what a table model provides.\n\nColumns: Review Type (x=162), Performer (x=321), Date of Review (x=443), Purpose (x=537), Outcome (x=978). The 'Date of Review' header itself wraps (3 at y=281, 8 at y=305) and straddles the other headers at y=293, so even the header row is not a single baseline.\n\nExpect Docyx to score poorly here. That is the point of the page: the truth set previously contained no case that the geometry cannot reach.",
+  "order": [
+    0, 1, 2,
+    4, 5, 3, 8, 6, 7,
+    11, 15, 20, 25, 29, 31,
+    13, 17, 22, 27,
+    18, 23,
+    9, 10, 12, 14, 19, 24, 28, 30, 32, 33,
+    16, 21, 26,
+    34
+  ]
+}

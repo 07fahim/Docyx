@@ -1,0 +1,24 @@
+{
+  "document": "wiki_bn.pdf",
+  "page": 5,
+  "checksum": "1ad1c15f16ee",
+  "language": "bn",
+  "confidence": "verified by reassembling split words",
+  "notes": "First Bengali truth page, and it discriminates for a reason specific to Indic script: conjunct rendering splits words across elements at a slightly different baseline, so naive (y, x) order tears them apart. Two cases, both verified by reassembling the word rather than by judgement — line 6 'দক্ষি' + line 5 'ণ-পূর্ব' = 'দক্ষিণ-পূর্ব' (south-east), so 6 precedes 5 even though 5 sits 6px higher; and lines 20 + 19 + 21 reassemble 'বাণিজ্' + 'যের' into 'বাণিজ্যের' (of trade), so 20 precedes 19 even though 19 sits higher. Naive order gets both backwards. Line 7 'প্রাচীন বাংলা' (ancient Bengal) and 11 'ইসলামি বাংলা' (Islamic Bengal) are section headings; 8, 9, 10 are figure captions, with 8 and 9 side by side under two images on the same baseline and read left to right.",
+  "order": [
+    0, 1, 2, 3, 4,
+    6, 5,
+    7,
+    8, 9, 10,
+    11,
+    12, 13, 14, 15, 16, 17, 18,
+    20, 19, 21,
+    22,
+    23, 24,
+    25, 26,
+    27, 28,
+    29, 30, 31,
+    32,
+    33, 34
+  ]
+}

@@ -10,7 +10,7 @@
     20,
     22
   ],
-  "uncertain_reason": "RESOLVED: DocLayNet convention — a caption reads as a contiguous unit, in place, never interleaved with the body text it sits beside. The rejected alternative hoisted it above the body on right-column-first grounds, which would only be correct if it were a page column rather than a float. Docyx scores 0.946 here and every break is inside this caption; that is a layout-classification limit, not a labelling doubt.",
+  "uncertain_reason": "DocLayNet convention: a caption reads as a contiguous unit, in place, never interleaved with the body text beside it. The rejected alternative hoisted it above the body on right-column-first grounds, which would only be correct if it were a page column rather than a float. DISCLOSURE: the original text of this field cited Docyx's score while justifying the choice, which is evidence the score was consulted during adjudication. The argument above stands on its own, but a reader of Arabic should still confirm it.",
   "order": [
     0,
     1,

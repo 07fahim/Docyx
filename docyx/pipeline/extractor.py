@@ -1,4 +1,4 @@
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 from docyx.analysis.layout import LayoutAnalyzer
 from docyx.analysis.reading_order import ReadingOrderCalculator
@@ -24,13 +24,27 @@ class DocyxPipeline:
         self.table_analyzer = table_analyzer or TableAnalyzer()
         self.visual_analyzer = visual_analyzer or VisualAnalyzer()
 
-    def process(self, file_path_or_stream: Union[str, bytes], document_id: str) -> Document:
+    def process(
+        self,
+        file_path_or_stream: Union[str, bytes],
+        document_id: str,
+        pages: Optional[Iterable[int]] = None,
+    ) -> Document:
+        """Extract a document, or just the pages named in `pages` (0-based).
+
+        Page selection is not an optimisation detail: a page of an 800-page
+        report costs the whole report without it, which makes large documents
+        impractical to evaluate or to serve a single page from. `Page.page_number`
+        stays absolute (1-based) so a selected page still says where it came
+        from; only the list is shortened.
+        """
         renderer = PDFRenderer(file_path_or_stream)
         try:
             extractor = NativeTextExtractor(renderer.doc)
             doc_model = Document(document_id=document_id, pages=[])
 
-            for page_num in range(len(renderer.doc)):
+            wanted = range(renderer.page_count()) if pages is None else pages
+            for page_num in wanted:
                 doc_model.pages.append(self._process_page(renderer, extractor, page_num))
 
             return doc_model
