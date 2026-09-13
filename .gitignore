@@ -4,5 +4,15 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
-# downloaded evaluation corpus
-.corpus/
+# Docling and its model weights live here, never in .venv — the core's 4-dependency
+# footprint is a measured claim (scripts/compare_tools.py) and must stay verifiable.
+.venv-bench/
+# Downloaded evaluation corpus. Excluding the *contents* rather than the directory
+# itself, because git will not descend into an excluded directory and the negation
+# below would never fire.
+.corpus/*
+# The hand-labelled reading order is not downloadable and is the only non-circular
+# yardstick the project has — it is source, not data.
+!.corpus/truth/
+# Regenerable: .venv-bench/Scripts/python.exe scripts/docling_dump.py <pdf>
+.corpus/docling/
