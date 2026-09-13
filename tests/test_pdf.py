@@ -142,3 +142,19 @@ def test_page_extent_matches_the_rendered_image(tmp_path, size):
     result = DocyxPipeline().process(str(pdf), document_id="sized").pages[0]
 
     assert (result.width, result.height) == (expected.width, expected.height)
+
+
+def test_a_non_pdf_is_rejected_rather_than_processed(tmp_path):
+    """§ v1 scope: PDF-only input, reject non-PDF.
+
+    PyMuPDF opens far more than PDF — XPS, EPUB, and Office documents — so
+    `fitz.open` succeeding is not evidence the input is a PDF. A .docx came
+    through the CLI and was reported as '1 pages - 1 ok', which is exactly the
+    silent wrong answer the scope limit exists to prevent: every coordinate,
+    every provenance claim and the schema's whole meaning assume a PDF page.
+    """
+    not_a_pdf = tmp_path / "notes.txt"
+    not_a_pdf.write_bytes(b"%!PS-Adobe-3.0\nplain text, definitely not a PDF\n")
+
+    with pytest.raises(ValueError, match="not a PDF"):
+        DocyxPipeline().process(str(not_a_pdf), document_id="nope")
