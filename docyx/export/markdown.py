@@ -87,6 +87,97 @@ def _table_markdown(table: Element) -> str:
     return "\n".join(out)
 
 
+# A line's x may exceed its paragraph's left edge by a pixel or two from glyph
+# overhang; a real first-line indent is an order of magnitude larger (23px at
+# 150 DPI in the arXiv corpus).
+INDENT_TOLERANCE = 10.0
+
+
+def _join_lines(parts: List[str]) -> str:
+    """Join wrapped lines back into a paragraph, repairing line-break hyphens.
+
+    PDF stores what was drawn, so a word broken across lines arrives as
+    "arbi-" + "trary". Joining on a space yields "arbi- trary", which is a
+    corrupted token to anything downstream — a retrieval index, a tokenizer, a
+    training target.
+
+    ponytail: a trailing hyphen followed by a lowercase letter is treated as a
+    line break, so a genuine compound broken at the margin ("well-" / "known")
+    loses its hyphen. Telling those apart needs a dictionary; the trade is worth
+    it because line breaks vastly outnumber compounds at the margin. Upgrade
+    path is a lexicon check if a corpus proves otherwise.
+    """
+    out = ""
+    for part in parts:
+        if not out:
+            out = part
+        elif out.endswith("-") and part[:1].islower():
+            out = out[:-1] + part
+        else:
+            out += " " + part
+    return out
+
+
+def _starts_paragraph(el: Element, left_edge: Optional[float]) -> bool:
+    """Is this line indented relative to the paragraph it would otherwise join?
+
+    A first-line indent is the only signal in the geometry that a new paragraph
+    began; without it every column collapses into one block of prose.
+
+    ponytail: left-edge indents only, so right-to-left pages (where the indent
+    is on the right) and paragraphs marked by vertical space alone are missed.
+    """
+    if left_edge is None:
+        return False
+    return el.geometry.bbox.x > left_edge + INDENT_TOLERANCE
+
+
+def _merge_split_headings(ordered: List[Element], levels: Dict[float, int]) -> List[Element]:
+    """Rejoin a heading that extraction split into separate elements.
+
+    "3.1  Pre-training BERT" is set as a number and a title with a wide gap
+    between them, which PyMuPDF reports as two lines on the same baseline.
+    Rendered separately they become two headings, so the document grows a
+    phantom section called "3.1".
+
+    Only merges neighbours that share a baseline *and* map to the same heading
+    level, so a run-in heading followed by body text ("Encoder: The encoder is
+    composed of...") is left alone — those are genuinely different roles.
+    """
+
+    def heading_level(el: Element) -> Optional[int]:
+        if not (el.typography and el.typography.font_size):
+            return None
+        return levels.get(round(el.typography.font_size, 1))
+
+    merged: List[Element] = []
+    for el in ordered:
+        if merged:
+            previous = merged[-1]
+            same_line = (
+                min(previous.geometry.bbox.y1, el.geometry.bbox.y1)
+                - max(previous.geometry.bbox.y, el.geometry.bbox.y)
+                > 0
+            )
+            level = heading_level(el)
+            # Both routes to a heading have to be covered: font size, and bold
+            # at body size. "2.1" + "Model and Architectures" takes the bold
+            # route, so handling size alone left it split.
+            joinable = (level is not None and level == heading_level(previous)) or (
+                level is None
+                and heading_level(previous) is None
+                and _is_bold(el)
+                and _is_bold(previous)
+            )
+            if same_line and joinable:
+                merged[-1] = previous.model_copy(
+                    update={"text": f"{(previous.text or '').strip()} {(el.text or '').strip()}"}
+                )
+                continue
+        merged.append(el)
+    return merged
+
+
 def _page_markdown(page: Page) -> str:
     if page.status is PageStatus.FAILED:
         reasons = ", ".join(e.code for e in page.errors) or "unknown"
@@ -101,14 +192,15 @@ def _page_markdown(page: Page) -> str:
 
     lines: List[str] = []
     paragraph: List[str] = []
+    left_edge: Optional[float] = None
 
     def flush():
         if paragraph:
-            lines.append(" ".join(paragraph))
+            lines.append(_join_lines(paragraph))
             lines.append("")
             paragraph.clear()
 
-    for el in ordered:
+    for el in _merge_split_headings(ordered, levels):
         text = (el.text or "").strip()
         if not text:
             continue
@@ -116,14 +208,25 @@ def _page_markdown(page: Page) -> str:
         level = levels.get(size)
         if level:
             flush()
+            left_edge = None
             lines.append(f"{'#' * level} {text}")
             lines.append("")
         elif _is_bold(el) and len(text) < 80:
             flush()
+            left_edge = None
             lines.append(f"**{text}**")
             lines.append("")
         else:
+            if _starts_paragraph(el, left_edge):
+                flush()
+                # Re-seed from this line. Keeping the old edge would compare
+                # every subsequent line against the *previous* column's margin,
+                # so a second column — indented relative to the first by
+                # definition — would split at every single line.
+                left_edge = None
             paragraph.append(text)
+            box = el.geometry.bbox
+            left_edge = box.x if left_edge is None else min(left_edge, box.x)
     flush()
 
     # Tables and figures carry no reading order (they are containers, see
