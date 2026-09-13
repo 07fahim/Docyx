@@ -188,3 +188,58 @@ def test_two_column_page_reads_down_each_column(tmp_path):
 
     assert "Machine learning models require large amounts of carefully labelled data." in md
     assert "This constraint often dominates the total cost of a research project." in md
+
+
+def test_line_break_hyphens_are_rejoined():
+    """PDF stores what was drawn, so a wrapped word arrives as two lines.
+    Joining on a space gives 'arbi- trary', a corrupted token to any tokenizer,
+    retrieval index or training target downstream.
+
+    Observed on arxiv_bert.pdf p3: arbi-/trary, in-/put, sin-/gle, clas-/
+    sification, ag-/gregate, embed-/ding, visualiza-/tion — seven in one page.
+    """
+    from docyx.export.markdown import _join_lines
+
+    assert _join_lines(["an arbi-", "trary span"]) == "an arbitrary span"
+    # A hyphen before a capital or a digit is not a line break.
+    assert _join_lines(["the GPT-", "3 model"]) == "the GPT- 3 model"
+    assert _join_lines(["plain", "lines"]) == "plain lines"
+
+
+def test_a_split_heading_does_not_become_two_headings():
+    """'3.1  Pre-training BERT' is set as a number and a title with a wide gap,
+    which PyMuPDF reports as two lines on one baseline. Rendered separately the
+    document grows a phantom section called '3.1'."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((60, 100), "3.1", fontsize=16)
+    page.insert_text((110, 100), "Pre-training BERT", fontsize=16)
+    # Body must outnumber the heading: _body_size takes the most common size,
+    # so a page that is mostly heading has no headings at all.
+    for i in range(5):
+        page.insert_text((60, 140 + i * 18), f"Body line {i} at the usual size.", fontsize=11)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    md = to_markdown(DocyxPipeline().process(pdf_bytes, "d"))
+
+    assert "3.1 Pre-training BERT" in md
+    assert "# 3.1\n" not in md and "**3.1**" not in md
+
+
+def test_an_indented_line_starts_a_new_paragraph():
+    """Without this every column collapses into one block of prose. The first
+    line indent is the only paragraph signal present in the geometry."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((60, 100), "First paragraph opening line here.", fontsize=11)
+    page.insert_text((60, 118), "continuing at the same left edge.", fontsize=11)
+    page.insert_text((78, 136), "Second paragraph, indented.", fontsize=11)
+    page.insert_text((60, 154), "and its continuation line.", fontsize=11)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    md = to_markdown(DocyxPipeline().process(pdf_bytes, "d"))
+
+    assert "First paragraph opening line here. continuing at the same left edge." in md
+    assert "Second paragraph, indented. and its continuation line." in md
