@@ -7,13 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 No build step, no packaging (`pyproject.toml` does not exist). Run everything through the venv interpreter:
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q            # full suite (~65 tests, ~2s)
-.venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.2.json after a schema change
+.venv/Scripts/python.exe -m pytest -q            # full suite (105 tests, ~55s)
+.venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.3.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
 ```
 
-There is no linter or formatter configured. `requirements.txt` omits `pydantic`, which every module imports — it arrives transitively via `layoutparser`. Add it explicitly if you touch dependencies.
+There is no linter or formatter configured.
 
 ## Architecture
 
@@ -72,23 +72,51 @@ Three guards, each added because removing it regressed a measured case:
 | `MIN_COLUMN_WIDTH_RATIO` 0.25 | Table columns are narrow. Without this, a results table reads downwards — cost 64 points on one GPT-3 page. 0.25 not 0.30 so three-column layouts survive. |
 | `ROW_GAP_FACTOR` 1.5, widest gap only | Cutting at *every* gap shatters a two-column body into strips that each still hold both columns. |
 
-Measured against PyMuPDF's own reading order across 8 real documents: **71.6% → 86.0%** mean agreement, +37% on the two-column paper. Re-run that sweep before touching the thresholds.
+Graded against hand-labelled ground truth in `.corpus/truth/`, not against another tool:
 
-Still geometric only: an RTL page reads its columns in the wrong order (needs `direction`, unpopulated).
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/dump_lines.py .corpus/x.pdf 3   # labelling worksheet
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_reading_order.py        # tau + adjacency
+PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
+```
+
+**Re-run `measure_reading_order.py` before touching the thresholds.** Currently 1.000 tau / 1.000 adjacency on 3 pages — but that is 3 pages of English academic papers, which is an instrument, not a benchmark. Extend it before claiming anything.
+
+The superseded metric was *agreement with PyMuPDF* (71.6% → 86.0%). Retired because it is circular: PyMuPDF is a dependency, so the ceiling was "equal PyMuPDF", and the two-column pages where XY-cut legitimately beats it scored as regressions.
+
+Truth files record a hand-verified order plus a checksum of the line inventory; the scorer fails loudly if extraction changes what the lines are, or if an order is not a permutation. **Forms are deliberately absent** — a tax form's 488 lines have no unambiguous linear order, so labelling one would invent truth rather than record it.
+
+Column order respects `direction`: `_is_rtl` takes a majority vote over each block's elements, so an RTL block reads its columns right to left and a mixed page resolves per block.
+
+`direction` comes from the line's direction vector (vertical vs horizontal) plus the **Unicode bidi category of the characters**. It deliberately does *not* use the span's `bidi` embedding level: measured on `.corpus/wiki_ar.pdf`, every Arabic span reports `bidi=0`, because the generator baked visual order into the glyph stream and discarded the levels. Trusting it classified all 74 elements on an Arabic page as LTR and left this whole RTL path dead on the documents it exists for.
+
+`Direction.TTB` text is pulled **out of the cut geometry** and read after the horizontal flow. One vertically-set line — the arXiv stamp down a paper's left margin — has a bbox as tall as the whole text body, so leaving it in bridges the gutter and defeats every column cut on the page. Same failure mode as a full-width rule, same remedy. Measured: this alone cost 0.22 coverage on `arxiv_bert.pdf` p0.
+
+**Floats are the known ceiling.** `.corpus/truth/wiki_ar.p6.json` scores 0.946 adjacency, and every remaining break is one figure caption whose three lines interleave by `y` with the body text beside them. Geometry cannot separate a float from body prose: the caption is 53px tall against a 1527px block, so `MIN_COLUMN_HEIGHT_RATIO` correctly refuses to call it a column. **Do not loosen that threshold to chase this page** — it would start treating short runs as columns everywhere and cost the pages now at 1.000. The fix is a layout model emitting `caption` regions through the `detector` seam. Truth files use the DocLayNet convention: a caption reads as a contiguous unit, in place, never interleaved.
+
+The wide-table failure ("tabular text cuts into columns and reads down rather than across") **did not reproduce** when measured. `arxiv_gpt3.pdf` p7 is an 8-column table with wide inter-column gaps — the exact shape that should break it — and XY-cut reads it correctly row-wise, 1.000/1.000, where the naive baseline gets 0.832. `MIN_COLUMN_WIDTH_RATIO` 0.25 is doing the work it was added for. Treat this as an unverified risk on denser tables, not a known defect.
 
 ### The schema is a published contract
 
-`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. `v1.1.json` is kept as the record of what the phase branches emit; `v1.2.json` is current (warnings became structured `PageIssue` records).
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` is current — `Element.direction` replaced per-element `language`.
 
 `PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
 
 ### The text-layer gate has two stages
 
-Presence, then quality (§18.3). A page with a text layer that decodes badly — subsetted fonts, no usable ToUnicode — still *passes* (its text is returned) but carries a `TEXT_LAYER_SUSPECT` warning that degrades it to `partial`. The heuristic measures the share of `U+FFFD` and private-use-area characters; `suspect_ratio` is the knob. It is validated against unit cases and a faked reader only — PyMuPDF's writer sanitizes unmappable codepoints on insert, so a real garbled fixture cannot be synthesized in-process.
+Presence, then quality (§18.3). Quality now covers two independent failures, and `GateResult` carries one warning, so the more severe (garbled text) wins.
+
+Run `scripts/measure_bidi.py` before trusting any RTL or Indic claim: it groups the corpus by `/Producer`, because **bidi and reordering behaviour is a property of the writing tool, not the script**. It warns on a producer monoculture, which is how the first version of these findings turned out to be Chrome-specific until Word was added.
+
+**`COMBINING_MARK_ORDER`** — the text layer is in glyph order, not logical order. Indic and SE-Asian scripts reorder on display (in বাংলা the vowel sign is typed after its consonant and drawn before it), and a dependent vowel sign can never legitimately begin a word. Measured: **Word-produced Bengali 8.3% word-initial marks, the same language from Chrome 0%**, Arabic and Latin 0%. Every character decodes and the multiset is intact — only one nukta is lost — so `TEXT_LAYER_SUSPECT`'s replacement-character heuristic is blind to it. This was silently returning scrambled Bengali as `ok` with `confidence 1.0 / exact`.
+
+**`RTL_VISUAL_ORDER`** — right-to-left text stored in *visual* rather than logical order. Confirmed across **two independent producers** (Chrome/Skia and Microsoft Word 2021), neither of which emits a non-zero `bidi` level, so this is how PDF works rather than one tool's quirk. Arabic words come back correctly, but bidi-neutral runs (digits, brackets, Latin) are reversed: `.corpus/wiki_ar.pdf` yields `]5[)2021(` where the document reads `(2021)[5]`. Recovering logical order needs the bidi algorithm run backwards, which is ambiguous and lossy — so the page is degraded to `partial` rather than returning scrambled text as `exact` with `confidence 1.0`. Detected by mirrored delimiters on majority-RTL lines only; verified zero false positives across 61 English pages and 8 Bengali. **This means byte-exactness is exact *to PyMuPDF*, not to the document's meaning — a distinction invisible in Latin scripts.**
+
+A page with a text layer that decodes badly — subsetted fonts, no usable ToUnicode — still *passes* (its text is returned) but carries a `TEXT_LAYER_SUSPECT` warning that degrades it to `partial`. The heuristic measures the share of `U+FFFD` and private-use-area characters; `suspect_ratio` is the knob. It is validated against unit cases and a faked reader only — PyMuPDF's writer sanitizes unmappable codepoints on insert, so a real garbled fixture cannot be synthesized in-process.
 
 ### Markdown export doubles as an evaluation instrument
 
-[docyx/export/markdown.py](docyx/export/markdown.py) reconstructs prose from the page representation. Scrambled output is the fastest available signal that reading order is wrong — which is why `test_two_column_page_reads_down_each_column` is a **strict xfail**: it documents the target behaviour and flips to passing when reading order learns column detection. Headings are inferred from font size because layout classification is still a stub; a real layout model's types should take precedence when one lands.
+[docyx/export/markdown.py](docyx/export/markdown.py) reconstructs prose from the page representation. Scrambled output is the fastest available signal that reading order is wrong — `test_two_column_page_reads_down_each_column` was a strict xfail until XY-cut landed and now passes; keep it as the canary. Headings are inferred from font size because layout classification is still a stub; a real layout model's types should take precedence when one lands.
 
 ### Real models (optional)
 
@@ -107,7 +135,6 @@ Detectors may declare an `engine` attribute; analyzers report it as `provenance.
 
 ### Known gaps
 
-- Reading order is single-column only (above).
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - No OCR, per v1 scope. `ocr` / `visual_inference` provenance and `inferred` confidence stay unused until phase 6.
 
