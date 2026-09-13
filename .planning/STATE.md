@@ -12,7 +12,7 @@ landed and claimed "Current Phase: None" until 2026-09-14.
 
 | Success criterion | Status |
 |---|---|
-| 1. Benchmark the *injected detector*, attributed to the detector | Rescoped in ROADMAP.md; not started |
+| 1. Verify injected detectors through the seam; cite published scores | **Done** — real Table Transformer verified end to end on arxiv_gpt3 p7 |
 | 2. Cross-model confidence calibration | **Deferred to Phase 5** — nothing Docyx-owned to calibrate while layout is a stub |
 | 3. Internal cross-domain evaluation set passes, incl. gate-failed cases | Substantially done |
 | 4. Dependency and licence audit | Done (`LICENSING.md`); model-weights audit still outstanding |
@@ -34,7 +34,7 @@ there is no Docyx-owned probability to calibrate.
 - Gate-failure coverage: `NO_TEXT_LAYER`, `TEXT_LAYER_SUSPECT`, `RTL_VISUAL_ORDER`,
   `COMBINING_MARK_ORDER`.
 
-Current: **1.000 tau / 0.991 adjacency**, +0.321 over the naive baseline.
+Current: **0.976 tau / 0.957 adjacency** over 8 pages, +0.146 tau / +0.329 adj over naive.
 
 ### Defects this evaluation found
 

@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 No build step, no packaging (`pyproject.toml` does not exist). Run everything through the venv interpreter:
 
 ```bash
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx file.pdf -o out.json   # CLI
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 .venv/Scripts/python.exe -m pytest -q            # full suite (105 tests, ~55s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.3.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence

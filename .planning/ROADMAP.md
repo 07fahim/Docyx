@@ -34,19 +34,35 @@
 against the tools it would actually be chosen over.
 **Mode:** mvp
 **Success Criteria:**
-1. **Injected detectors** are benchmarked against DocLayNet / PubLayNet / PubTables-1M,
-   with the score attributed to the detector, not to Docyx.
+1. **Injected detectors are verified through the seam, and their published scores
+   cited rather than reproduced.**
 2. *(Deferred to Phase 5)* Cross-model confidence calibration.
 3. Internal cross-domain evaluation set passes, including deliberate gate-failed test cases.
 4. Dependency and license audit is completed.
 
-**Why 1 was rescoped.** As originally written it read as a Docyx quality gate, and it
-is not one. DocLayNet and PubLayNet grade *layout detection*, which is a stub here;
-PubTables-1M grades table structure, which is Table Transformer's. Running them
-unchanged produces a number that looks like a Docyx result and actually measures
-whichever model was injected through the `detector` seam. Publishing it that way would
-make §26.11's swappability claim unverifiable — the same reason analyzers already
-report `provenance.engine` from the detector rather than their own name.
+**Why 1 was rescoped twice.** First, as written it read as a Docyx quality gate and is
+not one: DocLayNet and PubLayNet grade *layout detection*, which is a stub here, and
+PubTables-1M grades table structure, which is Table Transformer's.
+
+Then the rescoped version was dropped too, because re-running those benchmarks would
+reproduce a number the model's authors already published, at a cost of 30-200 GB of
+downloads, and would teach nothing about this codebase. The question worth answering is
+not "how good is Table Transformer" — Microsoft answered that — but "does a model
+injected through our seam arrive intact, attributed to itself".
+
+**Verified** on `arxiv_gpt3.pdf` p7 with the real `TableTransformerDetector`:
+
+| check | result |
+|---|---|
+| table element produced | yes, 64 cells |
+| `provenance.engine` | `microsoft/table-transformer` — the detector, not the analyzer |
+| `provenance.source` | `table_model` |
+| `confidence.type` | `detected` |
+| cell text | from the native layer (`GPT-3 Small`, `125M`) — no OCR |
+| `text` elements unaffected | 114, all still `exact` / `native_pdf` |
+
+The seam contract is pinned by `tests/test_table_transformer.py` — engine attribution,
+native-layer cell text, and the fallback when a detector declares no engine.
 
 **Why 2 was deferred.** Calibration compares a confidence value against observed
 correctness. Native text is `1.0 / exact` by construction and detector confidence is
