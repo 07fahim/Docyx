@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import fitz
 
 from docyx.core.constants import SCALE
@@ -5,10 +7,23 @@ from docyx.core.constants import SCALE
 
 class PDFRenderer:
     def __init__(self, file_path_or_stream):
-        if isinstance(file_path_or_stream, str):
-            self.doc = fitz.open(file_path_or_stream)
+        if isinstance(file_path_or_stream, (str, Path)):
+            self.doc = fitz.open(str(file_path_or_stream))
         else:
             self.doc = fitz.open(stream=file_path_or_stream, filetype="pdf")
+
+        # PyMuPDF opens XPS, EPUB, CBZ and Office documents too, so `open`
+        # succeeding is not evidence of a PDF. v1 is PDF-only, and a .docx went
+        # through the pipeline reported as "1 ok" — every coordinate, every
+        # provenance claim and the schema's meaning assume a PDF page, so a
+        # silent wrong answer is the worst outcome available here.
+        if not self.doc.is_pdf:
+            fmt = (self.doc.metadata or {}).get("format", "unknown")
+            self.doc.close()
+            raise ValueError(
+                f"input is not a PDF (PyMuPDF reports {fmt!r}); "
+                "v1 accepts PDF only"
+            )
 
     def page_count(self) -> int:
         """Declared here so callers need not reach through to the fitz document."""
