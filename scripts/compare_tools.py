@@ -25,6 +25,19 @@ flattered Docyx (see `stream` and `coverage`): ligature folding, and scoring
 recall instead of symmetric similarity so page-spanning blocks aren't charged
 as ordering errors. Together they accounted for the entire apparent gap.
 
+**The Docyx column is near-tautological.** The reference stream is built from
+the same `lines` list Docyx orders, so whenever adjacency is 1.000 the two
+strings are byte-identical and the column restates measure_reading_order.py. It
+is kept only to make the reference explicit.
+
+**A deficit here is not necessarily an ordering error.** Audited on the current
+corpus, 100% of Docling's shortfall is page furniture it declines to emit — the
+rotated arXiv stamp (25 chars on bert p0) and a page-number footer (1 char on
+attention p2). Not one character is misordered. The supported conclusion is
+"neither tool made a detectable ordering error here", NOT "Docyx orders better".
+The `missing` column exists so that distinction stays visible: inspect it before
+quoting the score.
+
 Honest limit that remains: the reference stream is built from Docyx's own
 characters, so the *content* side of the comparison is Docyx's by construction.
 This measures ORDER, not extraction fidelity. A tool that reads different
@@ -33,7 +46,6 @@ exist to make that visible rather than invisible.
 """
 
 import json
-import re
 import unicodedata
 import sys
 from difflib import SequenceMatcher
@@ -44,7 +56,6 @@ from docyx.pipeline.extractor import DocyxPipeline
 from scripts.measure_reading_order import TRUTH_DIR, CORPUS_DIR, load_truth, neutral_lines
 
 DOCLING_DIR = Path(".corpus/docling")
-KEEP = re.compile(r"[^a-z0-9]")
 
 
 def stream(texts) -> str:
@@ -59,7 +70,14 @@ def stream(texts) -> str:
     score by a third of a percent.
     """
     folded = unicodedata.normalize("NFKD", "".join(texts).lower())
-    return KEEP.sub("", folded)
+    # str.isalnum() is Unicode-aware. A [a-z0-9] filter deleted every non-Latin
+    # script outright: wiki_ar p6 collapsed from 3870 characters to 121, and the
+    # survivors were the bidi-neutral digit runs that RTL_VISUAL_ORDER flags as
+    # untrustworthy — so the page scored 1.000 on the one part of it we know is
+    # scrambled. A pure CJK or Devanagari page produced an empty reference and
+    # coverage() returned 0.0, reading as total failure rather than "not
+    # measurable".
+    return "".join(ch for ch in folded if ch.isalnum())
 
 
 def coverage(reference: str, candidate: str) -> float:
@@ -101,9 +119,15 @@ def compare(truth: dict) -> dict | None:
         items = json.loads(dump.read_text(encoding="utf-8"))
         docling_stream = stream(i["text"] for i in items if i["page"] == truth["page"])
 
+    missing = 0
+    if docling_stream is not None:
+        matcher = SequenceMatcher(None, reference, docling_stream, autojunk=False)
+        missing = len(reference) - sum(b.size for b in matcher.get_matching_blocks())
+
     return {
         "page": f"{Path(truth['document']).stem} p{truth['page']}",
         "ref_chars": len(reference),
+        "missing": missing,
         "docyx": coverage(reference, docyx_stream),
         "docyx_chars": len(docyx_stream),
         "docling": coverage(reference, docling_stream) if docling_stream is not None else None,
@@ -116,14 +140,16 @@ def main() -> int:
 
     results = [compare(load_truth(p)) for p in sorted(TRUTH_DIR.glob("*.json"))]
 
-    header = f"{'page':22s} {'ref':>6s} {'docyx':>7s} {'chars':>6s} {'docling':>8s} {'chars':>6s}"
+    header = (
+        f"{'page':22s} {'ref':>6s} {'docyx':>7s} {'docling':>8s} "
+        f"{'unmatched':>9s}"
+    )
     print(header)
     for r in results:
         docling = f"{r['docling']:8.3f}" if r["docling"] is not None else f"{'--':>8s}"
-        dchars = f"{r['docling_chars']:6d}" if r["docling_chars"] is not None else f"{'--':>6s}"
         print(
-            f"{r['page']:22s} {r['ref_chars']:6d} {r['docyx']:7.3f} "
-            f"{r['docyx_chars']:6d} {docling} {dchars}"
+            f"{r['page']:22s} {r['ref_chars']:6d} {r['docyx']:7.3f} {docling} "
+            f"{r['missing']:9d}"
         )
 
     scored = [r for r in results if r["docling"] is not None]
@@ -131,6 +157,10 @@ def main() -> int:
         print()
         print(f"mean docyx   {sum(r['docyx'] for r in scored) / len(scored):.3f}")
         print(f"mean docling {sum(r['docling'] for r in scored) / len(scored):.3f}")
+        print()
+        print("  `unmatched` = reference characters Docling did not emit in order.")
+        print("  Inspect these before quoting the score: on this corpus they are")
+        print("  entirely page furniture (arXiv stamp, page number), not misordering.")
     return 0
 
 

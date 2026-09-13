@@ -171,3 +171,29 @@ def test_four_columns_read_down_each_column_in_turn():
 
     assert order[:8] == [f"C0L{r}" for r in range(8)]
     assert order[8:16] == [f"C1L{r}" for r in range(8)]
+
+
+def test_adjacency_is_blind_to_a_swapped_page_but_tau_is_not():
+    """Documents a limit of the evaluation harness, not of the algorithm.
+
+    `adj` looks like the readability metric, and is not. Swap the top and
+    bottom halves of a page — output no human could read — and every adjacent
+    pair but one survives, so adj scores ~0.99: indistinguishable from a
+    perfect result. Only tau collapses.
+
+    Measured on the real truth files: halves-swapped scores adj 0.980-0.991
+    against a reported mean of 0.991. Quoting adj alone would have hidden a
+    total column-order failure, so scripts/measure_reading_order.py prints both
+    and this test stops the pair being separated.
+    """
+    from scripts.measure_reading_order import adjacent_accuracy, kendall_tau
+
+    order = list(range(40))
+    half = len(order) // 2
+    swapped = order[half:] + order[:half]
+
+    truth_rank = {line: rank for rank, line in enumerate(order)}
+    pred_rank = {line: rank for rank, line in enumerate(swapped)}
+
+    assert adjacent_accuracy(order, pred_rank) > 0.95, "adj should look fine — that is the point"
+    assert kendall_tau(truth_rank, pred_rank) < 0.0, "tau must catch what adj misses"

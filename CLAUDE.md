@@ -78,9 +78,19 @@ Graded against hand-labelled ground truth in `.corpus/truth/`, not against anoth
 PYTHONPATH=. .venv/Scripts/python.exe scripts/dump_lines.py .corpus/x.pdf 3   # labelling worksheet
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_reading_order.py        # tau + adjacency
 PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
 ```
 
-**Re-run `measure_reading_order.py` before touching the thresholds.** Currently 1.000 tau / 1.000 adjacency on 3 pages — but that is 3 pages of English academic papers, which is an instrument, not a benchmark. Extend it before claiming anything.
+**What the harness does and does not establish** (audited; read before quoting a number):
+
+- **Quote `tau` and `adj` together.** `adj` is nearly blind to the failure it looks like it catches: swap a page's top and bottom halves — unreadable — and adj still scores ~0.99. Only tau collapses. Pinned by `test_adjacency_is_blind_to_a_swapped_page_but_tau_is_not`. Gain over naive is **+0.158 tau / +0.321 adj**; quoting only the larger is cherry-picking.
+- **The Docling comparison does not show Docyx ordering better.** 100% of Docling's current deficit is page furniture it declines to emit (the arXiv stamp, a page number) — zero characters are misordered. The supported claim is "neither tool made a detectable ordering error on these pages". The Docyx column is near-tautological: the reference is built from the same lines Docyx orders.
+- **Speed is not a like-for-like ratio.** Default `DocyxPipeline()` runs *stub* layout and table detectors; a full stack attempts strictly more work. Median 0.221 s/page (range 0.140–0.267) for native extraction + render, no models.
+- **Effectively 4 independent documents**, 3 of them two-column arXiv preprints — the layout family XY-cut was designed for. `nasa_budget.pdf`, `rfc9110.pdf` and every Word-produced non-Latin file are present but unlabelled.
+- **Extraction fidelity is ungradeable here.** The labeller can only permute Docyx's own line list, so over-segmentation, under-segmentation and wrong line text cannot be scored. A dropped line trips the checksum and prompts re-labelling rather than lowering the score.
+
+**Re-run `measure_reading_order.py` before touching the thresholds.** Currently 1.000 tau / 0.991 adjacency on 6 pages — but that is 3 pages of English academic papers, which is an instrument, not a benchmark. Extend it before claiming anything.
 
 The superseded metric was *agreement with PyMuPDF* (71.6% → 86.0%). Retired because it is circular: PyMuPDF is a dependency, so the ceiling was "equal PyMuPDF", and the two-column pages where XY-cut legitimately beats it scored as regressions.
 

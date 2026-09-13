@@ -14,11 +14,14 @@ Two metrics, because they fail differently:
 - `tau`   Kendall rank correlation. Global. Tolerates a locally misplaced line,
           punishes reading the columns in the wrong order.
 - `adj`   Fraction of consecutive truth pairs that are also consecutive and in
-          order in the prediction. Local and brutal — this is the one that
-          predicts whether reconstructed prose is readable.
+          order in the prediction. Local: it sees line-level shuffling.
 
-A page can score a high tau and a poor adj (columns right, lines shuffled
-within them) or the reverse (paragraphs intact, columns swapped).
+**Read them together; neither is sufficient.** adj is nearly blind to the
+catastrophe it looks like it should catch: swap the top and bottom halves of a
+page — unreadable output — and adj still scores ~0.99, because all but one
+adjacent pair survives. tau drops to about -0.01 on the same input. Conversely
+tau tolerates local shuffling that destroys prose. Reporting adj alone would
+have hidden a column-order failure completely.
 """
 
 import json
@@ -133,6 +136,7 @@ def score_page(truth: dict) -> dict:
         "tau": kendall_tau(truth_rank, pred_rank),
         "adj": adjacent_accuracy(order, pred_rank),
         "naive_adj": adjacent_accuracy(order, naive_rank),
+        "naive_tau": kendall_tau(truth_rank, naive_rank),
     }
 
 
@@ -147,21 +151,31 @@ def main() -> int:
 
     results = [score_page(load_truth(p)) for p in paths]
 
-    print(f"{'page':28s} {'lines':>5s} {'tau':>7s} {'adj':>7s} {'naive':>7s} {'gain':>6s}")
+    print(
+        f"{'page':26s} {'lines':>5s} {'tau':>7s} {'naive':>7s} "
+        f"{'adj':>7s} {'naive':>7s} {'gain':>6s}"
+    )
     for r in results:
         gain = r["adj"] - r["naive_adj"]
         flag = "" if gain > 0.001 else "  <- no discriminating power"
         print(
-            f"{r['page']:28s} {r['lines']:5d} {r['tau']:7.3f} {r['adj']:7.3f} "
-            f"{r['naive_adj']:7.3f} {gain:+6.3f}{flag}"
+            f"{r['page']:26s} {r['lines']:5d} {r['tau']:7.3f} {r['naive_tau']:7.3f} "
+            f"{r['adj']:7.3f} {r['naive_adj']:7.3f} {gain:+6.3f}{flag}"
         )
 
-    mean_tau = sum(r["tau"] for r in results) / len(results)
-    mean_adj = sum(r["adj"] for r in results) / len(results)
-    mean_naive = sum(r["naive_adj"] for r in results) / len(results)
+    def mean(key):
+        return sum(r[key] for r in results) / len(results)
+
     print(
-        f"{'MEAN':28s} {'':5s} {mean_tau:7.3f} {mean_adj:7.3f} "
-        f"{mean_naive:7.3f} {mean_adj - mean_naive:+6.3f}"
+        f"{'MEAN':26s} {'':5s} {mean('tau'):7.3f} {mean('naive_tau'):7.3f} "
+        f"{mean('adj'):7.3f} {mean('naive_adj'):7.3f} "
+        f"{mean('adj') - mean('naive_adj'):+6.3f}"
+    )
+    print()
+    print(
+        f"  gain over naive:  tau {mean('tau') - mean('naive_tau'):+.3f}"
+        f"   adj {mean('adj') - mean('naive_adj'):+.3f}"
+        "   <- quote both; adj has the larger spread"
     )
     return 0
 
