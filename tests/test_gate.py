@@ -104,3 +104,54 @@ def test_whitespace_is_not_counted_toward_the_ratio():
     assert _suspect_ratio("") == 0.0
     assert _suspect_ratio("clean text") == 0.0
     assert _suspect_ratio("ab" + PUA * 2) == 0.5
+
+
+def test_rtl_text_in_visual_order_is_flagged(doc):
+    """Measured on .corpus/wiki_ar.pdf, where PyMuPDF returns ']5[)2021(' for
+    what the document reads as '(2021)[5]'.
+
+    The Arabic words themselves come back in correct logical order; the
+    bidi-neutral runs — digits, brackets, parentheses — do not, because the
+    generator baked the bidi reordering into the glyph stream. Recovering
+    logical order needs the bidi algorithm run backwards, which is ambiguous
+    and lossy, so the honest response is to say so rather than return the text
+    as `exact` with confidence 1.0.
+    """
+    from docyx.pipeline.gate import _rtl_visual_order
+
+    assert _rtl_visual_order("متوسط العمر]1[)2020( سنة") is True
+    assert _rtl_visual_order("متوسط العمر [1] (2020) سنة") is False
+
+
+def test_latin_text_with_unmatched_brackets_is_not_flagged():
+    """The check only inspects majority-RTL lines. A stray closer in English
+    prose — 'see b) above' — must not degrade an otherwise clean page."""
+    from docyx.pipeline.gate import _rtl_visual_order
+
+    assert _rtl_visual_order("see b) above, and item 3] in the list") is False
+
+
+def test_reordered_combining_marks_are_flagged():
+    """Indic scripts reorder: in বাংলা the vowel sign is typed after its
+    consonant but drawn before it. A producer that stores glyph order rather
+    than logical order therefore emits the mark first, and a dependent vowel
+    sign cannot legitimately begin a word.
+
+    Measured on a Word-produced Bengali PDF (.corpus/word_bn.pdf): 8.3% of
+    words start with a combining mark, against 0% for the same language from
+    Chrome (.corpus/wiki_bn.pdf). The character multiset survives — only one
+    nukta is lost — so this is an ordering defect, not a decoding one, and
+    TEXT_LAYER_SUSPECT's replacement-character heuristic cannot see it.
+    """
+    from docyx.pipeline.gate import _combining_mark_order
+
+    # Vowel sign U+09BF placed before its consonant, as glyph order would.
+    assert _combining_mark_order("িক াঘ িচ") is True
+    assert _combining_mark_order("কি ঘা চি বাংলাদেশ ঢাকা") is False
+
+
+def test_latin_and_arabic_do_not_trigger_the_mark_check():
+    from docyx.pipeline.gate import _combining_mark_order
+
+    assert _combining_mark_order("ordinary English prose here") is False
+    assert _combining_mark_order("تُعد مصر من أقدم الحضارات") is False
