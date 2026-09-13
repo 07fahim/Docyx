@@ -2,16 +2,80 @@
 
 ## Active Phase
 
-**Current Phase:** None
-**Status:** Project initialized, ready for planning.
+**Current Phase:** 4 — Evaluation and Hardening
+**Status:** In progress.
+
+Phases 1–3 are implemented and committed; this file was never updated as they
+landed and claimed "Current Phase: None" until 2026-09-14.
+
+## Phase 4 progress
+
+| Success criterion | Status |
+|---|---|
+| 1. Passes DocLayNet / PubLayNet / PubTables-1M | Not started — **scope questioned**, see below |
+| 2. Cross-model confidence calibration verified | Not started |
+| 3. Internal cross-domain evaluation set passes, incl. gate-failed cases | Substantially done |
+| 4. Dependency and licence audit | Done (`LICENSING.md`); model-weights audit still outstanding |
+
+### Criterion 1 needs rescoping before any work starts
+
+DocLayNet and PubLayNet grade *layout detection*, which is still a stub here, and
+PubTables-1M grades Table Transformer. Running them would measure whichever model
+is injected through the `detector` seam, not Docyx. Attributing those scores to
+Docyx would make §26.11's swappability claim unverifiable — the same reason
+analyzers report `provenance.engine` from the detector rather than their own name.
+
+Rescope to: benchmark the injected detector, attribute the score to the detector.
+
+### Criterion 3 — what exists
+
+- `.corpus/truth/` — 6 hand-labelled reading-order pages across 3 genres
+  (two-column academic, monospace spec, wide table) and 3 scripts (Latin, Arabic).
+- `scripts/measure_reading_order.py` — tau + adjacency against truth, reporting the
+  naive baseline per page so a non-discriminating page cannot inflate the mean.
+- `scripts/compare_tools.py` — Docyx vs Docling on the same pages.
+- `scripts/measure_bidi.py` — RTL storage behaviour grouped by PDF `/Producer`.
+- Gate-failure coverage: `NO_TEXT_LAYER`, `TEXT_LAYER_SUSPECT`, `RTL_VISUAL_ORDER`,
+  `COMBINING_MARK_ORDER`.
+
+Current: **1.000 tau / 0.991 adjacency**, +0.321 over the naive baseline.
+
+### Defects this evaluation found
+
+Five, four fixed, all invisible to the pre-existing English corpus:
+
+1. Vertically-set margin text defeated column detection (cost 0.22 on one page).
+2. RTL direction detection was dead on real Arabic — it trusted `span["bidi"]`,
+   which real PDFs report as 0.
+3. RTL text stored in visual order was returned as `exact` / `confidence 1.0`.
+4. Bengali from Word was silently scrambled — glyph order, every character present,
+   reported `ok`. Only a second PDF producer could reveal this.
+5. Band ordering ignored writing direction, reversing every multi-element RTL row.
+
+Not fixed — **floats are the measured ceiling**. A figure caption interleaved with
+body text needs layout classification, not threshold tuning. See
+`.corpus/truth/wiki_ar.p6.json`.
+
+### Known gaps in the evaluation itself
+
+- One Arabic page; no Bengali reading-order truth.
+- Two producers of RTL content (Chrome/Skia, Word 2021) — enough to show the
+  finding is not tool-specific, not enough to call it universal.
+- Forms are deliberately unlabelled: a tax form's 488 lines have no unambiguous
+  linear order.
 
 ## Next Steps
 
-Run `/gsd-plan-phase 1` to begin Phase 1: Foundation.
+1. Rescope criterion 1 in `ROADMAP.md`.
+2. Extend the truth set — Bengali reading order, a second Arabic page.
+3. Decide criterion 2's meaning while layout classification is a stub.
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-08)
+See: .planning/PROJECT.md
 
-**Core value:** Reconstruct each PDF page as a structured, inspectable representation with unified geometry, provenance, and confidence — enabling downstream consumers to understand not just what was extracted, but how and how reliably.
-**Current focus:** Initialization complete.
+**Core value:** Reconstruct each PDF page as a structured, inspectable representation
+with unified geometry, provenance, and confidence — enabling downstream consumers to
+understand not just what was extracted, but how and how reliably.
+
+*Last updated: 2026-09-14*

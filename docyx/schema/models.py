@@ -11,8 +11,12 @@ class Direction(str, Enum):
     """Writing direction of a text element (§13).
 
     Tracked per element, not per page: a page may mix directions, and forcing
-    one global direction on it loses that. Read from the PDF itself — the line's
-    direction vector and the span's bidi level — so it is exact, never guessed.
+    one global direction on it loses that. Read from the line's direction vector
+    (vertical vs horizontal) and the Unicode bidi category of the characters
+    themselves (LTR vs RTL), so it is derived, never guessed.
+
+    Not from the span's ``bidi`` embedding level, which real Arabic PDFs report
+    as 0 on every span — see ``_direction`` in docyx/pdf/text_extractor.py.
 
     Per-element *language* is deliberately absent: PDFs carry no such field, so
     populating it would mean detection, which could not honestly be `exact`.

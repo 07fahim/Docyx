@@ -55,7 +55,7 @@
       "type": "string"
     },
     "Direction": {
-      "description": "Writing direction of a text element (\u00a713).\n\nTracked per element, not per page: a page may mix directions, and forcing\none global direction on it loses that. Read from the PDF itself \u2014 the line's\ndirection vector and the span's bidi level \u2014 so it is exact, never guessed.\n\nPer-element *language* is deliberately absent: PDFs carry no such field, so\npopulating it would mean detection, which could not honestly be `exact`.",
+      "description": "Writing direction of a text element (\u00a713).\n\nTracked per element, not per page: a page may mix directions, and forcing\none global direction on it loses that. Read from the line's direction vector\n(vertical vs horizontal) and the Unicode bidi category of the characters\nthemselves (LTR vs RTL), so it is derived, never guessed.\n\nNot from the span's ``bidi`` embedding level, which real Arabic PDFs report\nas 0 on every span \u2014 see ``_direction`` in docyx/pdf/text_extractor.py.\n\nPer-element *language* is deliberately absent: PDFs carry no such field, so\npopulating it would mean detection, which could not honestly be `exact`.",
       "enum": [
         "ltr",
         "rtl",

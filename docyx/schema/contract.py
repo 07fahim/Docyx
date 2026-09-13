@@ -43,4 +43,13 @@ def write() -> Path:
 
 
 if __name__ == "__main__":
-    print(f"wrote {write()}")
+    import sys
+
+    if "--write" in sys.argv[1:]:
+        print(f"wrote {write()}")
+    else:
+        # Print, don't write. `--write` was documented but never parsed, so a
+        # bare invocation silently rewrote the published artifact — which erases
+        # the very signal test_published_schema_matches_the_models exists to
+        # give: an intentional schema change should surface as a reviewable diff.
+        print(json.dumps(current_schema(), indent=2))
