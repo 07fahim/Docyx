@@ -28,14 +28,36 @@ choice, so it can be revisited deliberately rather than rediscovered.
 All permissive and compatible with AGPL-3.0. Not required by the core: the
 pipeline falls back to heuristics without them.
 
-No model weights ship with the project. Layout and table detection are
-injected through the `detector` seam, so **whichever model you plug in brings
-its own licence** — that is a separate audit, and it has not been done, because
-no model is wired up yet. §27's warning applies squarely there: an
-open-source model does not imply open-source weights or commercial-use rights.
+No model weights ship with the project. Layout and table detection are injected
+through the `detector` seam, so **whichever model you plug in brings its own
+licence**. §27's warning applies squarely: an open-source model does not imply
+open-source weights or commercial-use rights.
 
-Evaluation datasets (DocLayNet, PubLayNet, PubTables-1M) also carry their own
-terms and are not audited here; none are used yet.
+### Weights audit — one model is now wired up
+
+`TableTransformerDetector` (commit `2dd28d1`) downloads weights at first use.
+They are **not** vendored, so this is a licence obligation on the *deployer*,
+not on this repository:
+
+| Weights | Licence | Downloaded by |
+|---|---|---|
+| `microsoft/table-transformer-detection` | MIT | `TableTransformerDetector` on first `detect()` |
+| `microsoft/table-transformer-structure-recognition` | MIT | same |
+
+MIT permits commercial use and imposes only attribution, so neither constrains
+the delivery model. Nothing else is wired up; **re-run this audit whenever a
+detector is added**, because a permissively licensed *library* routinely ships
+non-commercial weights (several layout models are CC-BY-NC), and that asymmetry
+is what §27 warns about.
+
+Note the training data is a separate question again: PubTables-1M is CC-BY 4.0,
+but a model's weights licence does not inherit its dataset's terms, and vendors
+do not always say so.
+
+Evaluation datasets (DocLayNet CDLA-Permissive-1.0, PubLayNet CDLA-Permissive-1.0,
+PubTables-1M CC-BY 4.0) carry their own terms. None are used yet; Phase 4
+criterion 1 will introduce them, and they are permissive for research and
+commercial use but require attribution.
 
 ## Why AGPL-3.0
 
