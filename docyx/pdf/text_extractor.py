@@ -1,4 +1,5 @@
 import fitz
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 from docyx.core.constants import SCALE
@@ -96,8 +97,16 @@ def _direction(line: Dict[str, Any], spans: List[Dict[str, Any]]) -> Direction:
     """Writing direction, read from the PDF rather than inferred (§13).
 
     The line's ``dir`` is a unit vector: (1, 0) for ordinary horizontal text,
-    (0, +/-1) once the text is set vertically. The span's ``bidi`` is a
-    bidirectional embedding level, and odd levels are right-to-left.
+    (0, +/-1) once the text is set vertically.
+
+    Horizontal direction is decided by the Unicode bidi category of the
+    characters, NOT by the span's ``bidi`` embedding level. Measured on a real
+    Arabic PDF (`.corpus/wiki_ar.pdf`): every span reports ``bidi=0``, because
+    the generator laid the glyphs out visually and discarded the levels. That
+    is normal — PDF is a presentation format — and trusting ``bidi`` classified
+    all 74 elements on an Arabic page as LTR, leaving the RTL column-ordering
+    path dead on exactly the documents it was written for. A character cannot
+    misreport its own script.
     """
     dx, dy = line.get("dir", (1.0, 0.0))
     if abs(dx) < 1e-9 and abs(dy) < 1e-9:
@@ -105,8 +114,14 @@ def _direction(line: Dict[str, Any], spans: List[Dict[str, Any]]) -> Direction:
     if abs(dy) > abs(dx):
         return Direction.TTB
 
-    scoring = [s for s in spans if s.get("text", "").strip()]
-    if not scoring:
+    categories = [
+        unicodedata.bidirectional(ch) for ch in "".join(s.get("text", "") for s in spans)
+    ]
+    rtl = sum(1 for c in categories if c in ("R", "AL"))
+    ltr = sum(1 for c in categories if c == "L")
+    if not rtl and not ltr:
+        # Digits, brackets and spaces are bidi-neutral — they take direction
+        # from their surroundings rather than carrying one. A line holding only
+        # neutrals is genuinely unknown, not left-to-right by default.
         return Direction.UNKNOWN
-    dominant = max(scoring, key=lambda s: len(s.get("text", "").strip()))
-    return Direction.RTL if int(dominant.get("bidi", 0)) % 2 else Direction.LTR
+    return Direction.RTL if rtl > ltr else Direction.LTR
