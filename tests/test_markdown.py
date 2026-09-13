@@ -243,3 +243,49 @@ def test_an_indented_line_starts_a_new_paragraph():
 
     assert "First paragraph opening line here. continuing at the same left edge." in md
     assert "Second paragraph, indented. and its continuation line." in md
+
+
+def test_a_table_row_renders_as_one_row_not_one_block_per_cell():
+    """Table detection is a stub, so a table's cells arrive as plain text
+    elements sharing a baseline. Rendered individually each cell became its own
+    paragraph — an 8-column table turned into 8 blocks per row.
+
+    Measured on arxiv_gpt3.pdf p7, whose hyperparameter table now reads
+    'GPT-3 Small 125M 12 768 12 64 0.5M 6.0 x 10-4' as a single line.
+    """
+    doc = fitz.open()
+    page = doc.new_page()
+    for row in range(3):
+        for col, value in enumerate(["alpha", "10", "20", "30"]):
+            page.insert_text((60 + col * 120, 100 + row * 20), f"{value}{row}", fontsize=11)
+    for i in range(6):
+        page.insert_text((60, 200 + i * 18), f"Ordinary prose line {i} follows.", fontsize=11)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    md = to_markdown(DocyxPipeline().process(pdf_bytes, "d"))
+
+    assert "alpha0 100 200 300" in md
+    assert "alpha1 101 201 301" in md
+    # Rows stay on separate lines rather than flowing into one paragraph.
+    assert "alpha0 100 200 300 alpha1" not in md
+
+
+def test_a_run_in_heading_does_not_swallow_the_sentence_after_it():
+    """Guards the over-correction: grouping by baseline alone let a bold
+    heading absorb the sentence starting on its line, producing
+    '**Input/Output Representations To make BERT**'. Only neighbours with the
+    same style role may merge."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((60, 100), "Heading Here", fontsize=11, fontname="hebo")
+    page.insert_text((160, 100), "and the sentence that runs on from it", fontsize=11)
+    for i in range(6):
+        page.insert_text((60, 130 + i * 18), f"More body text on line {i}.", fontsize=11)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    md = to_markdown(DocyxPipeline().process(pdf_bytes, "d"))
+
+    assert "**Heading Here**" in md
+    assert "**Heading Here and the sentence" not in md

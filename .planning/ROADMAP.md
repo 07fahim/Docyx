@@ -30,13 +30,32 @@
 4. Gate-failed pages route layout/visual output to the `diagnostic_elements` array.
 
 ## Phase 4: Evaluation and Hardening
-**Goal:** Evaluate extraction quality against public benchmarks and internal datasets.
+**Goal:** Evaluate extraction quality against ground truth the project controls, and
+against the tools it would actually be chosen over.
 **Mode:** mvp
 **Success Criteria:**
-1. System passes tests against DocLayNet, PubLayNet, and PubTables-1M benchmarks.
-2. Cross-model confidence calibration is verified.
+1. **Injected detectors** are benchmarked against DocLayNet / PubLayNet / PubTables-1M,
+   with the score attributed to the detector, not to Docyx.
+2. *(Deferred to Phase 5)* Cross-model confidence calibration.
 3. Internal cross-domain evaluation set passes, including deliberate gate-failed test cases.
 4. Dependency and license audit is completed.
+
+**Why 1 was rescoped.** As originally written it read as a Docyx quality gate, and it
+is not one. DocLayNet and PubLayNet grade *layout detection*, which is a stub here;
+PubTables-1M grades table structure, which is Table Transformer's. Running them
+unchanged produces a number that looks like a Docyx result and actually measures
+whichever model was injected through the `detector` seam. Publishing it that way would
+make §26.11's swappability claim unverifiable — the same reason analyzers already
+report `provenance.engine` from the detector rather than their own name.
+
+**Why 2 was deferred.** Calibration compares a confidence value against observed
+correctness. Native text is `1.0 / exact` by construction and detector confidence is
+the detector's, so with layout classification still a stub there is no Docyx-owned
+probability to calibrate. Revisit once a real layout model is wired in.
+
+**What criterion 3 turned out to be worth.** The evaluation set is not a formality —
+building it found five defects, four now fixed, every one invisible to the English
+corpus and three invisible until a second PDF producer existed. See `STATE.md`.
 
 ## Phase 5: Productization
 **Goal:** Build the visual workspace UI and prepare the system for distribution.

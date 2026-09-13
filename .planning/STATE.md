@@ -12,20 +12,16 @@ landed and claimed "Current Phase: None" until 2026-09-14.
 
 | Success criterion | Status |
 |---|---|
-| 1. Passes DocLayNet / PubLayNet / PubTables-1M | Not started — **scope questioned**, see below |
-| 2. Cross-model confidence calibration verified | Not started |
+| 1. Benchmark the *injected detector*, attributed to the detector | Rescoped in ROADMAP.md; not started |
+| 2. Cross-model confidence calibration | **Deferred to Phase 5** — nothing Docyx-owned to calibrate while layout is a stub |
 | 3. Internal cross-domain evaluation set passes, incl. gate-failed cases | Substantially done |
 | 4. Dependency and licence audit | Done (`LICENSING.md`); model-weights audit still outstanding |
 
-### Criterion 1 needs rescoping before any work starts
+### Criteria 1 and 2 — rescoped, see ROADMAP.md
 
-DocLayNet and PubLayNet grade *layout detection*, which is still a stub here, and
-PubTables-1M grades Table Transformer. Running them would measure whichever model
-is injected through the `detector` seam, not Docyx. Attributing those scores to
-Docyx would make §26.11's swappability claim unverifiable — the same reason
-analyzers report `provenance.engine` from the detector rather than their own name.
-
-Rescope to: benchmark the injected detector, attribute the score to the detector.
+Done. Criterion 1 now benchmarks the injected detector and attributes the score to
+it; criterion 2 is deferred to Phase 5, because with layout classification a stub
+there is no Docyx-owned probability to calibrate.
 
 ### Criterion 3 — what exists
 
@@ -66,9 +62,10 @@ body text needs layout classification, not threshold tuning. See
 
 ## Next Steps
 
-1. Rescope criterion 1 in `ROADMAP.md`.
-2. Extend the truth set — Bengali reading order, a second Arabic page.
-3. Decide criterion 2's meaning while layout classification is a stub.
+1. Extend the truth set — Bengali reading order, a second Arabic page, a second
+   producer of RTL content that stores *logical* order (never yet tested).
+2. Table structure: the markdown export now renders a detected-as-prose table as
+   rows, but real structure still needs a table model through the `detector` seam.
 
 ## Project Reference
 

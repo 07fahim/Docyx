@@ -18,8 +18,9 @@ element types should take precedence and this should become the fallback.
 """
 
 from collections import Counter
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+from docyx.core.geometry import BoundingBox
 from docyx.schema.models import Document, Element, Page, PageStatus
 
 # A size must exceed body text by this factor before it counts as a heading.
@@ -132,50 +133,71 @@ def _starts_paragraph(el: Element, left_edge: Optional[float]) -> bool:
     return el.geometry.bbox.x > left_edge + INDENT_TOLERANCE
 
 
-def _merge_split_headings(ordered: List[Element], levels: Dict[float, int]) -> List[Element]:
-    """Rejoin a heading that extraction split into separate elements.
+# A line assembled from this many separate elements is structured, not prose:
+# real prose arrives one element per line. Three is the smallest count that
+# cannot happen by accident from a run-in heading or a trailing citation.
+TABULAR_PARTS = 3
 
-    "3.1  Pre-training BERT" is set as a number and a title with a wide gap
-    between them, which PyMuPDF reports as two lines on the same baseline.
-    Rendered separately they become two headings, so the document grows a
-    phantom section called "3.1".
 
-    Only merges neighbours that share a baseline *and* map to the same heading
-    level, so a run-in heading followed by body text ("Encoder: The encoder is
-    composed of...") is left alone — those are genuinely different roles.
+def _style_role(el: Element, levels: Dict[float, int]) -> Tuple[Optional[int], bool]:
+    """What this element would render as: heading level, and boldness.
+
+    Merging is restricted to neighbours sharing a role. Without that guard a
+    bold heading absorbs the run-in sentence that starts on its baseline —
+    "Input/Output Representations" + "To make BERT" became one heading.
     """
+    size = (
+        round(el.typography.font_size, 1)
+        if el.typography and el.typography.font_size
+        else None
+    )
+    return levels.get(size), _is_bold(el)
 
-    def heading_level(el: Element) -> Optional[int]:
-        if not (el.typography and el.typography.font_size):
-            return None
-        return levels.get(round(el.typography.font_size, 1))
 
-    merged: List[Element] = []
+def _visual_lines(
+    ordered: List[Element], levels: Dict[float, int]
+) -> List[Tuple[Element, int]]:
+    """Group elements sharing a baseline into one visual line.
+
+    Extraction emits a line per text run, so anything set with wide internal
+    gaps — a table row, a numbered heading — arrives as several elements on one
+    baseline. Treated separately they each become their own block, which turns
+    an 8-column table into 8 paragraphs per row and a heading into two headings.
+
+    Returns each line with the number of elements it was assembled from, so the
+    caller can tell a table row from a sentence.
+
+    Safe against merging across columns: XY-cut emits a whole column before the
+    next begins, so two elements adjacent in *reading order* and sharing a
+    baseline are in the same column by construction.
+    """
+    lines: List[Tuple[Element, int]] = []
     for el in ordered:
-        if merged:
-            previous = merged[-1]
-            same_line = (
-                min(previous.geometry.bbox.y1, el.geometry.bbox.y1)
-                - max(previous.geometry.bbox.y, el.geometry.bbox.y)
-                > 0
-            )
-            level = heading_level(el)
-            # Both routes to a heading have to be covered: font size, and bold
-            # at body size. "2.1" + "Model and Architectures" takes the bold
-            # route, so handling size alone left it split.
-            joinable = (level is not None and level == heading_level(previous)) or (
-                level is None
-                and heading_level(previous) is None
-                and _is_bold(el)
-                and _is_bold(previous)
-            )
-            if same_line and joinable:
-                merged[-1] = previous.model_copy(
-                    update={"text": f"{(previous.text or '').strip()} {(el.text or '').strip()}"}
+        if lines:
+            previous, parts = lines[-1]
+            a, b = previous.geometry.bbox, el.geometry.bbox
+            same_role = _style_role(previous, levels) == _style_role(el, levels)
+            if same_role and min(a.y1, b.y1) - max(a.y, b.y) > 0:
+                top, bottom = min(a.y, b.y), max(a.y1, b.y1)
+                left, right = min(a.x, b.x), max(a.x1, b.x1)
+                lines[-1] = (
+                    previous.model_copy(
+                        update={
+                            "text": f"{(previous.text or '').strip()} {(el.text or '').strip()}",
+                            "geometry": previous.geometry.model_copy(
+                                update={
+                                    "bbox": BoundingBox(
+                                        x=left, y=top, width=right - left, height=bottom - top
+                                    )
+                                }
+                            ),
+                        }
+                    ),
+                    parts + 1,
                 )
                 continue
-        merged.append(el)
-    return merged
+        lines.append((el, 1))
+    return lines
 
 
 def _page_markdown(page: Page) -> str:
@@ -200,7 +222,8 @@ def _page_markdown(page: Page) -> str:
             lines.append("")
             paragraph.clear()
 
-    for el in _merge_split_headings(ordered, levels):
+    tabular = False
+    for el, parts in _visual_lines(ordered, levels):
         text = (el.text or "").strip()
         if not text:
             continue
@@ -216,7 +239,19 @@ def _page_markdown(page: Page) -> str:
             left_edge = None
             lines.append(f"**{text}**")
             lines.append("")
+        elif parts >= TABULAR_PARTS:
+            # Structured, so keep the row on its own line. Consecutive rows are
+            # not separated by blank lines, or the table reads as a list of
+            # unrelated fragments rather than a block.
+            flush()
+            left_edge = None
+            if not tabular:
+                tabular = True
+            lines.append(text)
         else:
+            if tabular:
+                lines.append("")
+                tabular = False
             if _starts_paragraph(el, left_edge):
                 flush()
                 # Re-seed from this line. Keeping the old edge would compare
@@ -227,6 +262,8 @@ def _page_markdown(page: Page) -> str:
             paragraph.append(text)
             box = el.geometry.bbox
             left_edge = box.x if left_edge is None else min(left_edge, box.x)
+    if tabular:
+        lines.append("")
     flush()
 
     # Tables and figures carry no reading order (they are containers, see
