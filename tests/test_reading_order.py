@@ -8,7 +8,7 @@ measurable case.
 from docyx.analysis.reading_order import ReadingOrderCalculator
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
-from docyx.schema.models import Element
+from docyx.schema.models import Direction, Element
 
 LINE_HEIGHT = 14.0
 
@@ -119,3 +119,33 @@ def test_three_columns_still_split():
     order = _order(page)
     assert order[:6] == [f"c0l{i}" for i in range(6)]
     assert order[6:12] == [f"c1l{i}" for i in range(6)]
+
+
+def _vertical(id_, x, y, height):
+    """A line of text set vertically — an arXiv stamp down a page's left margin.
+
+    PyMuPDF reports these with a ``dir`` of (0, +/-1), which the extractor
+    already turns into ``Direction.TTB``.
+    """
+    element = _line(id_, x, y, width=26.0)
+    element.geometry.bbox.height = height
+    element.direction = Direction.TTB
+    return element
+
+
+def test_vertical_margin_stamp_does_not_defeat_column_detection():
+    """Measured on arxiv_bert.pdf page 0, where this cost 0.22 similarity.
+
+    A rotated stamp is one line of text whose bbox is as tall as the whole text
+    body, so it spans both columns and bridges the gutter — the same failure a
+    full-width rule would cause, which is why cuts already exclude non-text
+    elements. Vertical text has to come out of the cut geometry for the same
+    reason, and is read after the horizontal flow.
+    """
+    page = [_vertical("stamp", x=20.0, y=100.0, height=260.0)]
+    for i in range(8):
+        page.append(_line(f"L{i}", x=100.0, y=100.0 + i * 20))
+        page.append(_line(f"R{i}", x=560.0, y=100.0 + i * 20))
+
+    expected = [f"L{i}" for i in range(8)] + [f"R{i}" for i in range(8)] + ["stamp"]
+    assert _order(page) == expected

@@ -58,12 +58,13 @@ class ReadingOrderCalculator:
     ahead of the sentence it introduces even though its bbox sits a fraction of
     a pixel higher.
 
-    ponytail: geometric only, and left-to-right within a cut. An RTL page will
-    read its columns in the wrong order; that needs `direction`, which the
-    schema reserves and extraction does not yet populate. Wide-spaced tabular
-    text can also cut into columns and read down rather than across, which is
-    the classic XY-cut failure — a real table model taking precedence is the
-    fix, not more tuning here.
+    Cuts are geometric, but column *order* is not: `direction` is read from the
+    PDF, so RTL blocks read right to left and vertically-set text is taken out
+    of the cut geometry entirely.
+
+    ponytail: wide-spaced tabular text can still cut into columns and read down
+    rather than across, which is the classic XY-cut failure — a real table model
+    taking precedence is the fix, not more tuning here.
     """
 
     @staticmethod
@@ -72,10 +73,18 @@ class ReadingOrderCalculator:
         min_gutter: float = MIN_GUTTER,
         min_row_gap: float = MIN_ROW_GAP,
     ) -> List[Element]:
-        text = [el for el in elements if el.type in ORDERABLE_TYPES]
+        orderable = [el for el in elements if el.type in ORDERABLE_TYPES]
         others = [el for el in elements if el.type not in ORDERABLE_TYPES]
 
-        ordered = _xy_cut(text, min_gutter, min_row_gap, depth=0)
+        # Vertically-set text is out of the horizontal flow. One such line — an
+        # arXiv stamp down a margin — has a bbox as tall as the whole text body,
+        # so leaving it in the cut geometry bridges the gutter and defeats every
+        # column cut on the page. Exactly the reason cuts already exclude rules.
+        # It is still text, so it keeps a reading position: after the flow.
+        flow = [el for el in orderable if el.direction is not Direction.TTB]
+        vertical = [el for el in orderable if el.direction is Direction.TTB]
+
+        ordered = _xy_cut(flow, min_gutter, min_row_gap, depth=0) + _geometric(vertical)
         for position, element in enumerate(ordered, start=1):
             element.reading_order = position
         for element in others:
@@ -83,7 +92,13 @@ class ReadingOrderCalculator:
 
         # Non-text elements carry no reading position; they follow in a stable
         # geometric order so page output stays deterministic.
-        return ordered + sorted(others, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
+        return ordered + _geometric(others)
+
+
+def _geometric(elements: List[Element]) -> List[Element]:
+    """Top-to-bottom, left-to-right. Used wherever order is positional rather
+    than a reading sequence, so page output stays deterministic."""
+    return sorted(elements, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
 
 
 def _xy_cut(
@@ -209,7 +224,14 @@ def _split(elements: List[Element], min_gap: float, horizontal: bool) -> List[Li
 
 
 def _banded(elements: Sequence[Element]) -> List[Element]:
-    """Read a block that resists cutting: line by line, left to right."""
+    """Read a block that resists cutting: line by line, in reading direction.
+
+    Column *order* already respected `direction`; banding did not, and sorted
+    every band left to right unconditionally. That reverses any RTL row holding
+    more than one element — measured on `.corpus/wiki_ar.pdf` p6, where a figure
+    caption sits beside the body text and the page scored 0.893 adjacency
+    against hand-labelled truth, *below* the naive baseline's 0.911.
+    """
     bands: List[List[Element]] = []
     top = bottom = 0.0
 
@@ -222,7 +244,12 @@ def _banded(elements: Sequence[Element]) -> List[Element]:
             bands.append([element])
             top, bottom = box.y, box.y1
 
-    return [el for band in bands for el in sorted(band, key=lambda e: e.geometry.bbox.x)]
+    rtl = _is_rtl(elements)
+    return [
+        el
+        for band in bands
+        for el in sorted(band, key=lambda e: e.geometry.bbox.x, reverse=rtl)
+    ]
 
 
 def _overlap(a_top: float, a_bottom: float, b_top: float, b_bottom: float) -> float:
