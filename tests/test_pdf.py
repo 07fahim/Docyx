@@ -1,5 +1,6 @@
 import pytest
 import fitz
+from docyx.core.constants import SCALE
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import PageStatus
 
@@ -116,3 +117,28 @@ def test_detector_failure_degrades_page_to_partial(tmp_path):
     assert [w.code for w in page.warnings] == ["STAGE_FAILED"]
     assert page.warnings[0].stage == "layout_detection"
     assert page.errors == []
+
+
+@pytest.mark.parametrize("size", [(612, 792), (595, 842), (842, 1191)])
+def test_page_extent_matches_the_rendered_image(tmp_path, size):
+    """Element coordinates live in pixmap space, so Page.width/height must be
+    the pixmap's, not int(points * SCALE).
+
+    Rendering rounds where int() truncates: A4 reported 1239x1754 for an image
+    that is 1240x1755, so a box on the right margin could exceed the page's own
+    declared width. Letter divides exactly, which is why every existing fixture
+    passed. Parametrised over Letter, A4 and A3 so one lucky page size cannot
+    hide it again.
+    """
+    width_pt, height_pt = size
+    doc = fitz.open()
+    page = doc.new_page(width=width_pt, height=height_pt)
+    page.insert_text((72, 100), "Text", fontsize=11)
+    expected = page.get_pixmap(matrix=fitz.Matrix(SCALE, SCALE))
+    pdf = tmp_path / "sized.pdf"
+    doc.save(str(pdf))
+    doc.close()
+
+    result = DocyxPipeline().process(str(pdf), document_id="sized").pages[0]
+
+    assert (result.width, result.height) == (expected.width, expected.height)

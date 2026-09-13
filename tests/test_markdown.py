@@ -289,3 +289,31 @@ def test_a_run_in_heading_does_not_swallow_the_sentence_after_it():
 
     assert "**Heading Here**" in md
     assert "**Heading Here and the sentence" not in md
+
+
+def test_single_leading_prose_is_not_merged_into_one_line():
+    """Regression: _visual_lines originally treated ANY vertical overlap as
+    'same baseline'. PyMuPDF line boxes span ascender to descender, so at
+    single leading (11pt text on an 11pt pitch) consecutive body lines overlap
+    and were merged into one element.
+
+    Two silent consequences: the merge joined with a bare space, bypassing
+    _join_lines so hyphen repair never ran; and `parts` climbed past
+    TABULAR_PARTS so an ordinary paragraph was emitted as a table row.
+
+    Every fixture here used 18-20pt spacing for 11pt text, which is why the
+    suite missed it. This one uses the tight case deliberately.
+    """
+    doc = fitz.open()
+    page = doc.new_page()
+    for i, line in enumerate(
+        ["An example of arbi-", "trary text that wraps", "across several lines", "at single leading."]
+    ):
+        page.insert_text((60, 100 + i * 11), line, fontsize=11)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    md = to_markdown(DocyxPipeline().process(pdf_bytes, "d"))
+
+    assert "arbitrary text that wraps" in md, "hyphen repair was bypassed by the merge"
+    assert "arbi- trary" not in md

@@ -33,7 +33,18 @@ MIN_COLUMN_HEIGHT_RATIO = 0.5
 # needing to recognise the table.
 # 0.25 rather than 0.30 so three-column layouts survive: three equal
 # columns plus gutters come to about 0.29 of the block each. Measured on
-# the corpus the two thresholds are within 0.1%, so this is free.
+# A text column fills most of its share of the block; a table column does not.
+# Measured min fill (column width / (block width / n_columns)):
+#   real two-column body        0.963      3-column synthetic   0.892
+#   4-column synthetic          0.774      narrow-table test    0.652
+#   real 8-column GPT-3 table   0.417
+# The two REAL cases sit either side with a wide margin. This replaced an
+# absolute share-of-block test, which demanded >= 0.25 per column and was
+# therefore unsatisfiable from four columns up.
+MIN_COLUMN_FILL = 0.70
+
+# Retained as the alternative test, not replaced. See _are_columns: the two
+# rules catch different regimes and a column need only satisfy one.
 MIN_COLUMN_WIDTH_RATIO = 0.25
 
 MAX_DEPTH = 24
@@ -182,9 +193,29 @@ def _are_columns(block: List[Element], columns: List[List[Element]]) -> bool:
     width = _extent(block, vertical=False)
     if height <= 0 or width <= 0:
         return False
+    slot = width / len(columns)
+
+    def wide_enough(col: List[Element]) -> bool:
+        """Two regimes, and a column need only satisfy one.
+
+        `share` — how much of the whole block the column spans. Meaningful
+        while there are few columns, but every column is inherently small once
+        there are many, so on its own it made four-column layouts impossible.
+
+        `fill` — how much of its own slot the column occupies. Generalises to
+        any column count, but punishes a wide gutter: a two-column page with
+        short lines and a large gutter scores 0.63, below a table's 0.65.
+
+        Neither alone separates real text columns from table columns; either
+        one holding is sufficient, and a table satisfies neither. Measured:
+        real 2-column body share 0.481 / fill 0.963; real 8-column GPT-3 table
+        share 0.052 / fill 0.417.
+        """
+        span = _extent(col, vertical=False)
+        return span / width >= MIN_COLUMN_WIDTH_RATIO or span / slot >= MIN_COLUMN_FILL
+
     return all(
-        _extent(col, vertical=True) / height >= MIN_COLUMN_HEIGHT_RATIO
-        and _extent(col, vertical=False) / width >= MIN_COLUMN_WIDTH_RATIO
+        _extent(col, vertical=True) / height >= MIN_COLUMN_HEIGHT_RATIO and wide_enough(col)
         for col in columns
     )
 

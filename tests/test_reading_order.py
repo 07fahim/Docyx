@@ -149,3 +149,25 @@ def test_vertical_margin_stamp_does_not_defeat_column_detection():
 
     expected = [f"L{i}" for i in range(8)] + [f"R{i}" for i in range(8)] + ["stamp"]
     assert _order(page) == expected
+
+
+def test_four_columns_read_down_each_column_in_turn():
+    """MIN_COLUMN_WIDTH_RATIO compared each column against the WHOLE block, so
+    it demanded every column be >= 25% of the block width. With N columns each
+    is about 1/N, which makes the test unsatisfiable from four columns up: the
+    vertical cut was always discarded and the page fell back to banding,
+    interleaving every row across all four columns.
+
+    The guard's real intent is that a text column fills its share of the block
+    while a table column does not. Measured: real two-column body 0.963, real
+    eight-column table 0.417.
+    """
+    page = []
+    for col in range(4):
+        for row in range(8):
+            page.append(_line(f"C{col}L{row}", x=100.0 + col * 250, y=100.0 + row * 20, width=180.0))
+
+    order = _order(page)
+
+    assert order[:8] == [f"C0L{r}" for r in range(8)]
+    assert order[8:16] == [f"C1L{r}" for r in range(8)]

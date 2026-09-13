@@ -20,6 +20,7 @@ element types should take precedence and this should become the fallback.
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
+from docyx.analysis.reading_order import BAND_OVERLAP, _overlap
 from docyx.core.geometry import BoundingBox
 from docyx.schema.models import Document, Element, Page, PageStatus
 
@@ -177,13 +178,20 @@ def _visual_lines(
             previous, parts = lines[-1]
             a, b = previous.geometry.bbox, el.geometry.bbox
             same_role = _style_role(previous, levels) == _style_role(el, levels)
-            if same_role and min(a.y1, b.y1) - max(a.y, b.y) > 0:
+            # Reuses reading_order's band test rather than "overlaps at all".
+            # PyMuPDF line boxes span ascender to descender, so at single
+            # leading consecutive body lines overlap slightly — a bare > 0 test
+            # merged whole paragraphs into one "line", which both skipped the
+            # hyphen repair and pushed ordinary prose past TABULAR_PARTS.
+            if same_role and _overlap(a.y, a.y1, b.y, b.y1) >= BAND_OVERLAP:
                 top, bottom = min(a.y, b.y), max(a.y1, b.y1)
                 left, right = min(a.x, b.x), max(a.x1, b.x1)
                 lines[-1] = (
                     previous.model_copy(
                         update={
-                            "text": f"{(previous.text or '').strip()} {(el.text or '').strip()}",
+                            "text": _join_lines(
+                                [(previous.text or "").strip(), (el.text or "").strip()]
+                            ),
                             "geometry": previous.geometry.model_copy(
                                 update={
                                     "bbox": BoundingBox(

@@ -64,9 +64,7 @@ class DocyxPipeline:
             if warning:
                 warnings.append(warning)
 
-        rect = renderer.doc[page_num].rect
-        width = int(rect.width * SCALE)
-        height = int(rect.height * SCALE)
+        width, height = renderer.page_size(page_num)
 
         if not gate_result.passed:
             return Page(
