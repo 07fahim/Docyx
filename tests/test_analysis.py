@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import fitz
 import pytest
 
@@ -7,6 +9,7 @@ from docyx.analysis.tables import CellDetection, TableAnalyzer, TableDetection
 from docyx.analysis.visual import VisualAnalyzer, VisualDetection
 from docyx.core.geometry import BoundingBox
 from docyx.core.metadata import ConfidenceType, ProvenanceSource
+from docyx.core.constants import SCALE
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import Element, PageStatus
 
@@ -209,3 +212,45 @@ def test_visual_analyzer_uses_geometry_inference_provenance():
     assert el.provenance.source == ProvenanceSource.GEOMETRY_INFERENCE
     assert el.confidence.type == ConfidenceType.DETECTED
     assert el.id == "page1_visual_0"
+
+
+CORPUS_PDF = Path(".corpus/arxiv_bert.pdf")
+
+
+def _image_only_pdf(source: Path, page_num: int) -> bytes:
+    """Rebuild a real page as pixels with no text layer — what a scan is."""
+    src = fitz.open(str(source))
+    pix = src[page_num].get_pixmap(matrix=fitz.Matrix(SCALE, SCALE))
+    png = pix.tobytes("png")
+    src.close()
+
+    out = fitz.open()
+    page = out.new_page(width=pix.width * 72 / 150, height=pix.height * 72 / 150)
+    page.insert_image(page.rect, stream=png)
+    data = out.tobytes()
+    out.close()
+    return data
+
+
+@pytest.mark.skipif(not CORPUS_PDF.exists(), reason="needs the downloadable corpus")
+def test_a_scanned_page_fails_the_gate_but_is_still_rendered():
+    """The deliberate gate-failed case, on a real document rather than a blank
+    fixture, and through the real analyzers rather than injected fakes.
+
+    This is the invariant the whole pipeline turns on (§18.1): the text-layer
+    gate decides whether a page produces valid *output*, and never prevents
+    rendering or visual detection. A scanned page must come back as a
+    well-formed, honestly-empty result — not an exception, and not silence.
+    """
+    data = _image_only_pdf(CORPUS_PDF, 3)
+    page = DocyxPipeline().process(data, document_id="scanned").pages[0]
+
+    assert page.status is PageStatus.FAILED
+    assert [e.code for e in page.errors] == ["NO_TEXT_LAYER"]
+    assert page.elements == []
+
+    # Rendering ran regardless of the gate — this is the point.
+    assert page.width > 0 and page.height > 0
+
+    # Nothing may be silently invented for a page with no text.
+    assert all(el.reading_order is None for el in page.diagnostic_elements)
