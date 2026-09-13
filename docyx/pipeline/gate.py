@@ -126,8 +126,13 @@ def _rtl_visual_order(text: str) -> bool:
     mirrored — ']5[' where the document reads '[5]' — which is unambiguous
     evidence that the bidi-neutral runs on that line are in visual order.
 
-    Only majority-RTL lines are inspected, so unmatched punctuation in Latin
-    prose ("see b) above") cannot trigger it.
+    Any line CONTAINING right-to-left characters is inspected, not only
+    majority-RTL ones. A bilingual line — 'Mixed English و عربي together' — is
+    majority Latin, so a majority test skipped it and let its Arabic run come
+    back reversed and unflagged. Bilingual lines are the common case in the
+    documents this exists for. Latin prose contains no RTL characters at all,
+    so unmatched punctuation in it ("see b) above") still cannot trigger this:
+    verified zero false positives across every non-RTL document in the corpus.
 
     ponytail: mirrored delimiters only. A stray unmatched closer inside genuine
     RTL prose would false-positive; detecting reversed digit runs directly
@@ -135,9 +140,7 @@ def _rtl_visual_order(text: str) -> bool:
     not an error, for exactly that reason.
     """
     for line in text.splitlines():
-        categories = [unicodedata.bidirectional(ch) for ch in line]
-        rtl = sum(1 for c in categories if c in ("R", "AL"))
-        if rtl <= sum(1 for c in categories if c == "L"):
+        if not any(unicodedata.bidirectional(ch) in ("R", "AL") for ch in line):
             continue
 
         open_depth: Dict[str, int] = {}

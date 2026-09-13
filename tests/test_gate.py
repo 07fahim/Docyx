@@ -155,3 +155,20 @@ def test_latin_and_arabic_do_not_trigger_the_mark_check():
 
     assert _combining_mark_order("ordinary English prose here") is False
     assert _combining_mark_order("تُعد مصر من أقدم الحضارات") is False
+
+
+def test_rtl_inside_a_mostly_latin_line_is_still_flagged():
+    """A bilingual line is the common case in the documents this targets, and
+    the majority-RTL test missed it.
+
+    'Mixed English و عربي together' is majority Latin, so the line was skipped
+    and its Arabic run came back reversed and unflagged. Requiring only the
+    PRESENCE of right-to-left characters catches it, and cannot fire on Latin
+    prose because Latin prose contains none — verified zero false positives
+    across every non-RTL document in the corpus.
+    """
+    from docyx.pipeline.gate import _rtl_visual_order
+
+    assert _rtl_visual_order("See note ]12[ in العربية for details") is True
+    assert _rtl_visual_order("See note [12] in العربية for details") is False
+    assert _rtl_visual_order("see b) above and item 3] here") is False
