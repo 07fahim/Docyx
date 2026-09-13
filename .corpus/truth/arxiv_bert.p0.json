@@ -1,0 +1,20 @@
+{
+  "document": "arxiv_bert.pdf",
+  "page": 0,
+  "checksum": "2f48b13d8672",
+  "notes": "Hardest layout in the set. A title (0,1) and a four-author row (2-5) span the full width above two columns; the abstract occupies the left column at a narrower indent, and the Introduction runs left-column-bottom then right-column-top. Line 13 is the rotated arXiv stamp in the left margin — it is marginalia with no place in the prose, and is labelled last by convention. If Docyx loses points only on 13, that is a labelling disagreement, not a defect.",
+  "order": [
+    0, 1,
+    2, 3, 4, 5,
+    6, 7,
+    8,
+    11, 14, 16, 18, 20, 21, 23, 25, 27, 29, 31, 33, 35, 36, 38,
+    41, 42, 43, 45, 48, 50, 52, 54, 56, 58, 59,
+    62, 63,
+    66, 68, 70, 72, 73, 76, 81, 82, 84, 86, 88, 92, 93, 95,
+    9, 10, 12, 15, 17, 19, 22, 24, 26, 28, 30, 32, 34, 37, 39,
+    40, 44, 46, 47, 49, 51, 53, 55, 57, 60, 61, 64, 65, 67, 69, 71,
+    74, 75, 77, 78, 80, 79, 83, 85, 87, 89, 90, 91, 94, 96,
+    13
+  ]
+}
