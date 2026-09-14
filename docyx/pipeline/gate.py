@@ -81,7 +81,9 @@ class TextLayerGate:
                         "combining marks appear before the characters they attach to; "
                         "the text layer is in glyph order rather than logical order, so "
                         "words in reordering scripts (Bengali, Devanagari, Thai) are "
-                        "scrambled even though every character is present"
+                        "scrambled. Characters may also be missing outright — this is a "
+                        "symptom of a broken font mapping, not only of ordering, and the "
+                        "text is not recoverable by rearranging it"
                     ),
                 ),
             )
@@ -167,8 +169,16 @@ def _combining_mark_order(text: str, ratio: float = 0.02) -> bool:
     the producer, not the script.
 
     Distinct from TEXT_LAYER_SUSPECT, which counts undecodable codepoints. Here
-    every character decodes and the multiset is intact; only the order is wrong,
-    so no amount of replacement-character counting would ever see it.
+    every character *decodes*, so no amount of replacement-character counting
+    would ever see it.
+
+    It does NOT follow that the text is merely rearranged. Measured on
+    `.corpus/word_bn.pdf` p0 against an independent reading of the same pixels:
+    the letters GHA, NGA, VOWEL SIGN O and NUKTA occur zero times in the text
+    layer and repeatedly in the rendered page. Word-initial marks are a
+    *symptom* of a broken font mapping, and this check detects the symptom, not
+    its extent. Treat the warning as "this text is unreliable", never as "this
+    text can be fixed by reordering it" — the characters are not all there.
 
     ponytail: word-initial marks only. Marks misplaced *within* a cluster are
     invisible to this, and detecting those needs real grapheme segmentation.
