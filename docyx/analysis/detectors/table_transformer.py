@@ -140,7 +140,7 @@ class TableTransformerDetector:
         columns.sort(key=lambda c: c[0])
 
         cells = []
-        for r_index, (top, bottom, r_score, _) in enumerate(rows):
+        for r_index, (top, bottom, r_score, is_header) in enumerate(rows):
             for c_index, (left, right, c_score) in enumerate(columns):
                 cells.append(
                     CellDetection(
@@ -154,6 +154,14 @@ class TableTransformerDetector:
                         row=r_index,
                         column=c_index,
                         score=min(r_score, c_score),
+                        # §11 requires header/body classification "where
+                        # detectable". The model detects it — "table column
+                        # header" is its own class — and this was binding the
+                        # flag to `_` and dropping it, while the module
+                        # docstring claimed the opposite. A table whose header
+                        # row is indistinguishable from its data is the
+                        # difference between a grid and a usable record.
+                        is_header=is_header,
                     )
                 )
         return cells
