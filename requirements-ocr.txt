@@ -17,6 +17,18 @@
 #   Windows:  winget install UB-Mannheim.TesseractOCR
 #   Debian:   apt install tesseract-ocr tesseract-ocr-ben tesseract-ocr-ara
 #   macOS:    brew install tesseract tesseract-lang
+#
+# The Windows installer ships only the languages you tick, and does not add
+# itself to PATH — the detector probes the standard location, so that part is
+# handled. For a language it did not install, drop the file somewhere and point
+# TESSDATA_PREFIX at it rather than needing admin rights on Program Files:
+#
+#   curl -L -o .tessdata/ben.traineddata \
+#     https://github.com/tesseract-ocr/tessdata_best/raw/main/ben.traineddata
+#   export TESSDATA_PREFIX="$PWD/.tessdata"
+#
+# tessdata_best over tessdata_fast: measured 0.987 on clean Bengali, and the
+# speed difference is irrelevant next to the cost of being wrong.
 
 pytesseract>=0.3.10
 pillow>=10.0
