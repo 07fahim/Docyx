@@ -1,7 +1,7 @@
 import unicodedata
 from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List, Optional
+from pydantic import BaseModel, Field, computed_field
 
 from docyx.core.constants import CANONICAL_DPI
 from docyx.core.geometry import Geometry
@@ -49,6 +49,39 @@ class Direction(str, Enum):
         return cls.RTL if rtl > ltr else cls.LTR
 
 
+def script_of(text: str) -> Optional[str]:
+    """Which writing system the text is in — derived, never guessed.
+
+    §7 of the plan asks for `language`, and this is deliberately not that. A
+    PDF carries no language field, so `"en"` could only come from statistical
+    detection, and a guess cannot honestly sit in a schema where every value
+    declares its own reliability. `direction` replaced it in v1.3 for exactly
+    that reason.
+
+    Script, unlike language, IS in the characters. Unicode names each codepoint
+    after its script — U+0995 is BENGALI LETTER KA — so the first word of the
+    name is the answer, with no table to maintain and no model to run. It
+    cannot distinguish English from French, and does not pretend to; it CAN
+    distinguish Bengali from Arabic from Latin, which is the distinction the
+    documents this tool exists for actually turn on.
+
+    Majority vote over letters only. Digits and punctuation are shared between
+    scripts and would drag every line towards whichever script names them.
+    """
+    scripts: Dict[str, int] = {}
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        name = unicodedata.name(ch, "")
+        if not name:
+            continue
+        script = name.split()[0].lower()
+        scripts[script] = scripts.get(script, 0) + 1
+    if not scripts:
+        return None
+    return max(scripts, key=lambda s: scripts[s])
+
+
 class PageStatus(str, Enum):
     OK = "ok"
     PARTIAL = "partial"
@@ -70,6 +103,37 @@ class Typography(BaseModel):
     font_size: Optional[float] = None
     flags: Optional[int] = None
     color: Optional[int] = None
+
+    # Derived from `flags` rather than stored alongside it, so the two can
+    # never disagree. §7 asks for bold and italic by name; making a consumer
+    # decode a PyMuPDF bitfield to get them is not "structured output".
+    # None, not False, when there are no flags at all — "this PDF did not say"
+    # is a different claim from "this text is not bold".
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def bold(self) -> Optional[bool]:
+        return None if self.flags is None else bool(self.flags & 16)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def italic(self) -> Optional[bool]:
+        return None if self.flags is None else bool(self.flags & 2)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def monospace(self) -> Optional[bool]:
+        return None if self.flags is None else bool(self.flags & 8)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def serif(self) -> Optional[bool]:
+        return None if self.flags is None else bool(self.flags & 4)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def superscript(self) -> Optional[bool]:
+        return None if self.flags is None else bool(self.flags & 1)
 
 
 class GridPosition(BaseModel):
@@ -95,6 +159,9 @@ class Element(BaseModel):
     reading_order: Optional[int] = None
     typography: Optional[Typography] = None
     direction: Optional[Direction] = None
+    #: Writing system, derived from the characters (§7). NOT language — see
+    #: `script_of`. None when the text holds no letters at all.
+    script: Optional[str] = None
     # Set on `table_cell` elements only; None everywhere else.
     grid: Optional[GridPosition] = None
     # Containment. A `table` holds its `table_cell` children here.
@@ -157,6 +224,20 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.5"
+    """One PDF in, one Document out.
+
+    `filename` and `page_count` are flat rather than nested under a `document`
+    object as §4's example shows: nesting would move `document_id` and
+    `schema_version` and break every existing consumer, which §19 reserves for
+    a major version. The information is the same.
+
+    `page_count` is the document's OWN length, which `len(pages)` is not once
+    `--pages` has selected a subset — so a caller can always tell a 3-page
+    document from three pages of a 300-page one.
+    """
+
+    schema_version: str = "1.6"
     document_id: str
+    filename: Optional[str] = None
+    page_count: Optional[int] = None
     pages: List[Page] = Field(default_factory=list)

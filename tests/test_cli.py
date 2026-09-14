@@ -53,7 +53,7 @@ def test_parse_pages(spec, expected):
 
 def test_clean_document_exits_zero(text_pdf, capsys):
     assert main([str(text_pdf), "-q"]) == 0
-    assert json.loads(capsys.readouterr().out)["schema_version"] == "1.5"
+    assert json.loads(capsys.readouterr().out)["schema_version"] == "1.6"
 
 
 def test_a_failed_page_exits_one(scanned_pdf, capsys):
