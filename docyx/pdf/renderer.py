@@ -25,6 +25,20 @@ class PDFRenderer:
                 "v1 accepts PDF only"
             )
 
+        # A PDF with no pages opens cleanly, reports is_pdf, and is not
+        # encrypted — it simply has nothing in it. Found on a real 14 MB
+        # Arabic government report whose page tree does not resolve. Left
+        # alone, `process()` returns a Document with zero pages and no error,
+        # and the CLI exits 0 because "every page produced a valid result" is
+        # vacuously true of no pages. Silently reporting success for a file
+        # that produced nothing is the worst outcome available here.
+        if len(self.doc) == 0:
+            self.doc.close()
+            raise ValueError(
+                "PDF contains no pages; the file is damaged or its page tree "
+                "could not be read"
+            )
+
     def page_count(self) -> int:
         """Declared here so callers need not reach through to the fitz document."""
         return len(self.doc)

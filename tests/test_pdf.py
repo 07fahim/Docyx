@@ -1,6 +1,7 @@
 import pytest
 import fitz
 from docyx.core.constants import SCALE
+from docyx.pdf.renderer import PDFRenderer
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import PageStatus
 
@@ -219,3 +220,30 @@ def test_one_unreadable_page_does_not_lose_the_whole_document(tmp_path, monkeypa
     ]
     assert document.pages[1].errors[0].code == "EXTRACTION_FAILED"
     assert "corrupt content stream" in document.pages[1].errors[0].message
+
+
+def test_a_pdf_with_no_pages_is_rejected():
+    """Found on a real 14 MB Arabic government annual report: a valid,
+    unencrypted PDF whose page tree yields nothing.
+
+    Without this the pipeline returns a Document with zero pages and no error,
+    and the CLI exits 0 — "every page produced a valid result" is vacuously
+    true of no pages. A file that produced nothing must not report success.
+
+    The fixture is written by hand because PyMuPDF refuses to SAVE a zero-page
+    document ("cannot save with zero pages") while opening one quite happily.
+    """
+    empty = b"\n".join(
+        [
+            b"%PDF-1.4",
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+            b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj",
+            b"trailer<</Root 1 0 R/Size 3>>",
+            b"%%EOF",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="no pages"):
+        PDFRenderer(empty)
+
+
