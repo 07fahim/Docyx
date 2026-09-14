@@ -3,7 +3,7 @@
 ## Active Phase
 
 **Current Phase:** 4 — Evaluation and Hardening
-**Status:** In progress.
+**Status:** Complete. Phase 5 (workspace UI) is next; its CLI deliverable shipped early.
 
 Phases 1–3 are implemented and committed; this file was never updated as they
 landed and claimed "Current Phase: None" until 2026-09-14.
@@ -14,8 +14,8 @@ landed and claimed "Current Phase: None" until 2026-09-14.
 |---|---|
 | 1. Verify injected detectors through the seam; cite published scores | **Done** — real Table Transformer verified end to end on arxiv_gpt3 p7 |
 | 2. Cross-model confidence calibration | **Deferred to Phase 5** — nothing Docyx-owned to calibrate while layout is a stub |
-| 3. Internal cross-domain evaluation set passes, incl. gate-failed cases | Substantially done |
-| 4. Dependency and licence audit | Done (`LICENSING.md`); model-weights audit still outstanding |
+| 3. Internal cross-domain evaluation set passes, incl. gate-failed cases | **Done** |
+| 4. Dependency and licence audit | **Done** — `LICENSING.md`, including the Table Transformer weights |
 
 ### Criteria 1 and 2 — rescoped, see ROADMAP.md
 
@@ -25,8 +25,9 @@ there is no Docyx-owned probability to calibrate.
 
 ### Criterion 3 — what exists
 
-- `.corpus/truth/` — 6 hand-labelled reading-order pages across 3 genres
-  (two-column academic, monospace spec, wide table) and 3 scripts (Latin, Arabic).
+- `.corpus/truth/` — 8 hand-labelled reading-order pages across 5 documents,
+  4 genres (two-column academic, monospace spec, wide table, government report)
+  and 3 scripts (Latin, Arabic, Bengali).
 - `scripts/measure_reading_order.py` — tau + adjacency against truth, reporting the
   naive baseline per page so a non-discriminating page cannot inflate the mean.
 - `scripts/compare_tools.py` — Docyx vs Docling on the same pages.
@@ -48,6 +49,17 @@ Five, four fixed, all invisible to the pre-existing English corpus:
    reported `ok`. Only a second PDF producer could reveal this.
 5. Band ordering ignored writing direction, reversing every multi-element RTL row.
 
+Then, after a phase 1-4 code review and an independent audit of the evaluation
+itself:
+
+6. Four-column layouts were impossible — the column guard was unsatisfiable above
+   three, so such pages fell back to interleaved banding.
+7. `source_type` was hardcoded `born_digital`, so it was wrong on every scanned page.
+8. One corrupt page raised out of `process()` and lost the whole document.
+9. A `.docx` was accepted and reported `ok`, violating the PDF-only scope limit.
+10. A bilingual line's RTL run came back reversed and unflagged, because the
+    visual-order check only inspected majority-RTL lines.
+
 Not fixed — **floats are the measured ceiling**. A figure caption interleaved with
 body text needs layout classification, not threshold tuning. See
 `.corpus/truth/wiki_ar.p6.json`.
@@ -62,10 +74,11 @@ body text needs layout classification, not threshold tuning. See
 
 ## Next Steps
 
-1. Extend the truth set — Bengali reading order, a second Arabic page, a second
-   producer of RTL content that stores *logical* order (never yet tested).
-2. Table structure: the markdown export now renders a detected-as-prose table as
-   rows, but real structure still needs a table model through the `detector` seam.
+1. **Run the CLI on real documents.** Every gap recorded here was found by poking
+   at the code; none came from a document someone actually needed to process.
+   Nothing else should be built until that produces information.
+2. Then, informed by (1): OCR (largest coverage gap), a layout model (fixes the
+   two worst scores and is the author's own field), or the phase-5 UI.
 
 ## Project Reference
 
