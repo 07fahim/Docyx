@@ -9,7 +9,8 @@ No build step, no packaging (`pyproject.toml` does not exist). Run everything th
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx file.pdf -o out.json   # CLI
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
-.venv/Scripts/python.exe -m pytest -q            # full suite (145 tests, ~9s)
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
+.venv/Scripts/python.exe -m pytest -q            # full suite (153 tests, ~10s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.3.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -28,7 +29,7 @@ The whole design turns on one decoupling: **the text-layer gate decides whether 
 3. `LayoutAnalyzer` + `TableAnalyzer` + `VisualAnalyzer` on the image — **unconditional**, they only need pixels. Each runs inside `_safely`; a detector that raises records a warning and yields no elements rather than killing the page.
 4. Branch on the gate:
    - **pass** → `NativeTextExtractor.extract_page` + detections → `ReadingOrderCalculator.calculate` → `elements`. Status is `ok`, or `partial` if any detector warned.
-   - **fail** → `status: failed`, `elements: []`, detections go to `diagnostic_elements`, gate error into `errors`
+   - **fail** → `status: failed`, `elements: []`, detections go to `diagnostic_elements`, gate error into `errors`. Unless an `OCRAnalyzer` is injected and recognises something, in which case the page becomes `partial` with `inferred` text — see **OCR** below.
 
 Reading order is the only stage genuinely dependent on text, which is why it sits inside the pass branch.
 
@@ -36,8 +37,8 @@ Reading order is the only stage genuinely dependent on text, which is why it sit
 
 - **Coordinates:** top-left origin, reference pixels at **150 DPI**. PDF points are multiplied by `SCALE` from [core/constants.py](docyx/core/constants.py) at every boundary — never re-derive `150/72` locally. Anything crossing into an `Element` must already be in 150-DPI space. The one deliberate exception is `Typography.font_size`, which stays in points.
 - **Geometry is unified:** every element type uses the same `Geometry` — required `bbox`, optional `polygon`, optional `rotation`. Do not add per-type geometry shapes.
-- **Confidence is two-tier:** native text is always `value=1.0, type=exact`. Detected elements (layout, table, visual) carry probabilistic `detected` confidence. `inferred` is reserved for OCR (phase 6) and must stay unused.
-- **Provenance sources active in v1:** `native_pdf`, `layout_model`, `table_model`, `geometry_inference`, `manual`. `ocr` and `visual_inference` exist in the enum but must stay unused.
+- **Confidence is three-tier:** native text is always `value=1.0, type=exact`. Detected elements (layout, table, visual) carry probabilistic `detected` confidence. **`inferred` belongs to OCR and to nothing else** — that split is what lets a consumer tell read text from recognised text without parsing engine names.
+- **Provenance sources active:** `native_pdf`, `layout_model`, `table_model`, `geometry_inference`, `manual`, and `ocr` (only when an OCR detector is injected). `visual_inference` exists in the enum but must stay unused.
 - **Mixed documents are normal.** Partial results, never reject the whole document.
 
 ### Detector injection
@@ -49,6 +50,7 @@ Every analyzer takes an optional `detector` and falls back to a stub returning `
 | `LayoutAnalyzer` | `List[Tuple[BoundingBox, float]]` | `layout_model` |
 | `TableAnalyzer` | `List[TableDetection]` (bbox, score, `cells`) | `table_model` |
 | `VisualAnalyzer` | `List[VisualDetection]` (bbox, kind, score) | `geometry_inference` |
+| `OCRAnalyzer` | `List[OCRLine]` (bbox, text, score) | `ocr` |
 
 `VisualAnalyzer` is the exception: its fallback is a **real OpenCV heuristic**, not an empty stub. It finds `rule` and `figure` elements via morphology. A rule must be both long (`min_rule_ratio`) and thin (`max_rule_thickness`) — without the thinness bound a solid filled block survives the directional opening and is misreported as a rule, suppressing the figure underneath it. Those constructor knobs are the tuning surface.
 
@@ -140,11 +142,31 @@ from docyx.analysis.detectors.table_transformer import TableTransformerDetector
 DocyxPipeline(table_analyzer=TableAnalyzer(detector=TableTransformerDetector()))
 ```
 
-**Table Transformer is an object detector, not OCR** — it emits row/column/table *boxes* from the page image and never reads a character from pixels (§2.2). Cell text is joined from the native layer by position in `_populate_cell_text`, so it stays `1.0 / exact` and `ocr`/`visual_inference` remain unused. Verified on a real IRS form: 731 text elements, all `native_pdf`.
+**Table Transformer is an object detector, not OCR** — it emits row/column/table *boxes* from the page image and never reads a character from pixels (§2.2). Cell text is joined from the native layer by position in `_populate_cell_text`, so it stays `1.0 / exact` — the table model never contributes `ocr` provenance. Verified on a real IRS form: 731 text elements, all `native_pdf`.
 
 The stack is optional by design — core stays at 4 light dependencies (§24). Core throughput is **0.221 s/page median** (`scripts/measure_speed.py`), with stub detectors; the model stack costs far more and has not been timed.
 
 Detectors may declare an `engine` attribute; analyzers report it as `provenance.engine` instead of their own heuristic name. Attributing a model's output to the heuristic it replaced would make §26.11's swappability claim unverifiable.
+
+### OCR (optional, opt-in)
+
+A page with no text layer fails the gate and returns nothing. That is most of what people mean by "a PDF I need to extract", so `OCRAnalyzer` is the fourth analyzer on the same `detector` seam — inject it and gate-failed pages are recognised from the rendered image instead of discarded.
+
+```bash
+pip install -r requirements-ocr.txt          # pytesseract + pillow, no torch
+python -m docyx scan.pdf --ocr ben           # or ara, or ben+eng
+```
+
+Four rules, none of them negotiable:
+
+- **OCR runs only on gate-failed pages.** The native layer is exact by construction; re-reading a page that has one would be a straight downgrade. Pinned by `test_native_text_is_never_re_read_from_pixels`.
+- **A recognised page is `partial`, never `ok`.** §24 makes a machine-readable text layer the condition for `ok`, and recognised text does not become one by being good. The gate's `NO_TEXT_LAYER` is demoted from `errors` to an `OCR_TEXT` warning — still true that there's no text layer, no longer true that the page produced nothing, and an `error` on a page with content makes callers throw usable output away.
+- **There is no default recogniser.** `ocr_analyzer` defaults to `None`, so the pipeline behaves exactly as it did before OCR existed. Silently degrading `exact` to `inferred` because someone happened to have tesseract on PATH would make the confidence model unreadable.
+- **Tesseract, deliberately not PaddleOCR/EasyOCR.** A ~5 MB binary plus one language file per script, against a ~2 GB torch tree — the same §24 resource constraint that ruled out the phase-4 model benchmarks. Accuracy on Indic and Arabic is the trade being made; swap the detector if it does not hold up.
+
+`lang` must match the document. `--ocr eng` on a Bengali scan does not fail — it returns confident Latin gibberish, which is worse. `--ocr-min-confidence` (default 0.4) drops low-scoring lines rather than returning them, because page speckle recognised as a one-character "word" lands mid-column and derails the reading order of everything around it.
+
+**The engine path is untested here** — no tesseract binary on this machine. Everything above the seam is tested with a fake detector; `TesseractDetector.__call__` itself has never run. Verify it against a real scan before quoting anything about quality.
 
 ### Page status and failure isolation
 
@@ -167,10 +189,10 @@ existed.
 
 ### Known gaps
 
-- **Scanned PDFs fail by design**, and that is most of what people mean by "a PDF I need to extract". Phase 6.
+- **Scanned PDFs need `--ocr`**, and the recogniser itself is unverified — no tesseract on this machine, so only the seam is tested. Without the flag a scanned page still fails, by design.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
-- No OCR, per v1 scope. `ocr` / `visual_inference` provenance and `inferred` confidence stay unused until phase 6.
+- `visual_inference` provenance is still unused, and has no planned producer.
 
 ## Planning docs
 
@@ -189,4 +211,6 @@ PyMuPDF is confined to [docyx/pdf/](docyx/pdf/); everything outside depends on t
 
 ## v1 scope limits (non-negotiable)
 
-PDF-only input, reject non-PDF at upload. No OCR, no model weights for OCR, no GPU. Requires a machine-readable text layer for `ok` status.
+PDF-only input, reject non-PDF at upload. No GPU, no bundled model weights. **A machine-readable text layer is still the condition for `ok`** — OCR is opt-in and its output is `partial` / `inferred`, which keeps that limit intact rather than repealing it.
+
+"No OCR" was a v1 limit until the owner lifted it; the resource constraint behind it was not lifted, which is why the recogniser is a 5 MB binary behind an optional dependency and not a torch stack.

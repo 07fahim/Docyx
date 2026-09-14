@@ -72,13 +72,33 @@ body text needs layout classification, not threshold tuning. See
 - Forms are deliberately unlabelled: a tax form's 488 lines have no unambiguous
   linear order.
 
+## Phase 6 (OCR) — seam landed early
+
+Pulled forward on the owner's instruction, because "a scanned page fails the gate"
+made the tool untestable against the documents they actually have.
+
+| Roadmap criterion | Status |
+|---|---|
+| 1. `ocr` and `visual_inference` provenance become active | **Partly** — `ocr` is live; `visual_inference` still has no producer |
+| 2. `inferred` confidence is populated | **Done** — by `OCRAnalyzer` and nothing else |
+| 3. OCR incorporated without breaking schema compatibility | **Done** — schema v1.3 unchanged, contract test green |
+
+Built as the fourth `detector` seam (`docyx/analysis/ocr.py` + a Tesseract adapter),
+not as a pipeline branch: no default recogniser, no new core dependency, and the
+default pipeline behaves exactly as before.
+
+**Untested below the seam.** No tesseract binary on the dev machine, so
+`TesseractDetector.__call__` has never executed. Eight tests cover the contract
+using a fake detector; none of them touch a recogniser. Quality is unknown, and
+Tesseract's Bengali accuracy in particular is the assumption most likely to fail.
+
 ## Next Steps
 
-1. **Run the CLI on real documents.** Every gap recorded here was found by poking
-   at the code; none came from a document someone actually needed to process.
-   Nothing else should be built until that produces information.
-2. Then, informed by (1): OCR (largest coverage gap), a layout model (fixes the
-   two worst scores and is the author's own field), or the phase-5 UI.
+1. **Run the CLI on real documents**, now including scanned ones via `--ocr`.
+   Every gap recorded here was found by poking at the code; none came from a
+   document someone actually needed to process.
+2. Then, informed by (1): a layout model (fixes the two worst reading-order
+   scores and is the author's own field), or the phase-5 UI.
 
 ## Project Reference
 
