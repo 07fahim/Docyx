@@ -83,8 +83,10 @@ corpus and three invisible until a second PDF producer existed. See `STATE.md`.
 4. Edited JSON validates against schema v1.1 and exports successfully (errors block export).
 5. Headless CLI batch processing is available.
 
-## Phase 6: Future OCR Extension
-**Goal:** (Future) Add OCR support for scanned/image-only PDFs.
+## Phase 6: OCR Extension
+**Goal:** Add OCR support for scanned/image-only PDFs. **Seam implemented ahead of
+phase 5** — see STATE.md. The recogniser adapter is written but unverified; what
+remains of this phase is evidence, not code.
 **Mode:** mvp
 **Success Criteria:**
 1. `ocr` and `visual_inference` provenance sources become active.
