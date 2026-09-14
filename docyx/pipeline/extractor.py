@@ -1,6 +1,7 @@
 from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 from docyx.analysis.layout import LayoutAnalyzer
+from docyx.analysis.ocr import OCRAnalyzer
 from docyx.analysis.reading_order import ReadingOrderCalculator
 from docyx.analysis.tables import TableAnalyzer
 from docyx.analysis.visual import VisualAnalyzer
@@ -18,11 +19,17 @@ class DocyxPipeline:
         layout_analyzer: Optional[LayoutAnalyzer] = None,
         table_analyzer: Optional[TableAnalyzer] = None,
         visual_analyzer: Optional[VisualAnalyzer] = None,
+        ocr_analyzer: Optional[OCRAnalyzer] = None,
     ):
         self.gate = TextLayerGate()
         self.layout_analyzer = layout_analyzer or LayoutAnalyzer()
         self.table_analyzer = table_analyzer or TableAnalyzer()
         self.visual_analyzer = visual_analyzer or VisualAnalyzer()
+        # No default recogniser. OCR needs a binary this project does not ship,
+        # and a pipeline that silently degrades exact text to inferred text
+        # because someone happened to have tesseract installed would make the
+        # confidence model unreadable. Opt in explicitly.
+        self.ocr_analyzer = ocr_analyzer
 
     def process(
         self,
@@ -110,15 +117,55 @@ class DocyxPipeline:
         width, height = renderer.page_size(page_num)
 
         if not gate_result.passed:
+            # The field exists to mark exactly this page. It defaulted to
+            # born_digital and was never assigned, so the one case it was
+            # for reported the opposite of the truth.
+            source_type = "scanned" if renderer.has_images(page_num) else "empty"
+
+            recognised: List[Element] = []
+            if self.ocr_analyzer is not None:
+                recognised, ocr_warning = _safely(
+                    "ocr", self.ocr_analyzer.analyze, image_bytes, page_num
+                )
+                if ocr_warning:
+                    warnings.append(ocr_warning)
+
+            if recognised:
+                return Page(
+                    page_number=page_num + 1,
+                    # Never OK. §24 makes a machine-readable text layer the
+                    # condition for `ok`, and recognised text does not become
+                    # one by being good — every character is `inferred`, so the
+                    # page is usable but not authoritative. PARTIAL says both.
+                    status=PageStatus.PARTIAL,
+                    width=width,
+                    height=height,
+                    source_type=source_type,
+                    # The gate error becomes a warning here: it is still true
+                    # that the page has no text layer, but it no longer means
+                    # the page produced nothing, and an `error` on a page with
+                    # content would make callers discard usable output.
+                    warnings=warnings
+                    + [
+                        PageIssue(
+                            code="OCR_TEXT",
+                            stage="ocr",
+                            message=(
+                                f"page has no text layer; {len(recognised)} lines were "
+                                "recognised from the rendered image and are `inferred`, "
+                                "not read from the document"
+                            ),
+                        )
+                    ],
+                    elements=ReadingOrderCalculator.calculate(recognised + detected),
+                )
+
             return Page(
                 page_number=page_num + 1,
                 status=PageStatus.FAILED,
                 width=width,
                 height=height,
-                # The field exists to mark exactly this page. It defaulted to
-                # born_digital and was never assigned, so the one case it was
-                # for reported the opposite of the truth.
-                source_type="scanned" if renderer.has_images(page_num) else "empty",
+                source_type=source_type,
                 errors=[gate_result.error],
                 warnings=warnings,
                 diagnostic_elements=detected,
