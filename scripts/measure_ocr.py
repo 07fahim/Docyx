@@ -17,7 +17,9 @@ from collections import Counter
 import sys
 import unicodedata
 
+import cv2
 import fitz
+import numpy as np
 
 from docyx.analysis.detectors.tesseract import TesseractDetector
 from docyx.analysis.ocr import OCRAnalyzer
@@ -29,13 +31,58 @@ for channel in (sys.stdout, sys.stderr):
         channel.reconfigure(encoding="utf-8")
 
 
-def flatten_to_image(pdf_path: str, page_num: int) -> bytes:
+#: Degradations a real scanner introduces and a flattened page does not, as
+#: (label, skew degrees, JPEG quality, gaussian noise sigma). The last row is
+#: not a worst case — it is an ordinary office scan of a photocopy.
+DEGRADATIONS = [
+    ("clean (flattened only)", 0.0, None, 0.0),
+    ("skew 1.5deg", 1.5, None, 0.0),
+    ("jpeg q40", 0.0, 40, 0.0),
+    ("noise sigma 12", 0.0, None, 12.0),
+    ("ordinary office scan", 1.5, 40, 12.0),
+    ("skew 5deg", 5.0, None, 0.0),
+    # The last row must FAIL. A sweep whose every row passes cannot tell a
+    # robust engine from a harness that is not degrading anything — the same
+    # fixture trap that made this repo's synthetic column tests vacuous.
+    ("bad photocopy (expect fail)", 7.0, 10, 45.0),
+]
+
+
+def degrade(png: bytes, skew: float, jpeg_quality, noise: float) -> bytes:
+    """Approximate a scanner: page skew, JPEG artefacts, sensor noise.
+
+    ponytail: three effects, no show-through, no lighting gradient, no paper
+    texture. It bounds the risk rather than removing it — a real scan is still
+    the only thing that settles this.
+    """
+    img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+
+    if skew:
+        h, w = img.shape
+        matrix = cv2.getRotationMatrix2D((w / 2, h / 2), skew, 1.0)
+        # White border, not black: a black fill would be read as ink and change
+        # the binarisation the recogniser does internally.
+        img = cv2.warpAffine(img, matrix, (w, h), borderValue=255)
+    if noise:
+        img = np.clip(img + np.random.normal(0, noise, img.shape), 0, 255).astype(np.uint8)
+    if jpeg_quality:
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+        img = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+
+    return cv2.imencode(".png", img)[1].tobytes()
+
+
+def flatten_to_image(pdf_path: str, page_num: int, degradation=None) -> bytes:
     """The same page with its text layer destroyed — what a scan of it is."""
     src = fitz.open(pdf_path)
     pix = src[page_num].get_pixmap(matrix=fitz.Matrix(SCALE, SCALE))
+    png = pix.tobytes("png")
+    if degradation:
+        png = degrade(png, *degradation)
+
     out = fitz.open()
     page = out.new_page(width=src[page_num].rect.width, height=src[page_num].rect.height)
-    page.insert_image(page.rect, stream=pix.tobytes("png"))
+    page.insert_image(page.rect, stream=png)
     data = out.tobytes()
     out.close()
     src.close()
@@ -104,8 +151,47 @@ def main(pdf_path: str, page_num: int, lang: str) -> int:
     return 0
 
 
+def sweep(pdf_path: str, page_num: int, lang: str) -> int:
+    """How fast does accuracy fall as the page gets more scan-like?
+
+    The single clean number is a ceiling and reads as reassurance. The shape of
+    the fall is the useful part: an engine that holds up to skew and collapses
+    on JPEG needs a different fix from one that degrades evenly.
+    """
+    native = page_text(DocyxPipeline().process(pdf_path, "native", pages=[page_num]).pages[0])
+    if not native.strip():
+        print(f"{pdf_path} p{page_num} has no native text to compare against")
+        return 2
+
+    detector = TesseractDetector(lang=lang)
+    if not set(lang.split("+")) <= set(detector.languages()):
+        print(f"language data for {lang!r} is not installed; have {detector.languages()}")
+        return 2
+    pipeline = DocyxPipeline(ocr_analyzer=OCRAnalyzer(detector=detector))
+
+    print(f"{pdf_path} p{page_num}  lang={lang}   degradation sweep")
+    print(f"  {'condition':<24} {'overlap':>8} {'conf':>7} {'lines':>6}")
+    for label, skew, quality, noise in DEGRADATIONS:
+        page = pipeline.process(
+            flatten_to_image(pdf_path, page_num, (skew, quality, noise)), "ocr"
+        ).pages[0]
+        text = page_text(page)
+        a = Counter(c for c in normalise(native) if not c.isspace())
+        b = Counter(c for c in normalise(text) if not c.isspace())
+        overlap = sum((a & b).values()) / max(sum(a.values()), 1)
+        scores = [el.confidence.value for el in page.elements if el.text]
+        mean = sum(scores) / len(scores) if scores else 0.0
+        print(f"  {label:<24} {overlap:>8.3f} {mean:>7.3f} {len(scores):>6}")
+
+    print("\n  Overlap is order-insensitive, so a broken native reference (RTL or")
+    print("  glyph order) shifts every row equally and the SHAPE stays readable.")
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    args = [a for a in sys.argv[1:] if a != "--sweep"]
+    if len(args) != 3:
         print(__doc__)
         raise SystemExit(2)
-    raise SystemExit(main(sys.argv[1], int(sys.argv[2]), sys.argv[3]))
+    run = sweep if "--sweep" in sys.argv else main
+    raise SystemExit(run(args[0], int(args[1]), args[2]))

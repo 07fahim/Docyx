@@ -188,7 +188,33 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/arxiv_atten
 
 `measure_ocr.py` therefore reports both metrics, and diagnoses a large gap between them as a reordering difference rather than a recognition failure.
 
-Two limits on the numbers. A flattened page is clean, deskewed and noise-free, so these are a **ceiling** — real scans will score lower. And English is 0.959 rather than 1.0 because OCR additionally picks up figure labels that the native layer holds as vector art (`Output Probabilities Linear Nx Nx Positional…`), which is extra content, not an error.
+English is 0.959 rather than 1.0 because OCR additionally picks up figure labels that the native layer holds as vector art (`Output Probabilities Linear Nx Nx Positional…`), which is extra content, not an error.
+
+#### Degradation sweep
+
+A flattened page is clean, deskewed and noise-free, so every number above is a **ceiling**. `--sweep` re-runs each page through synthetic scanner damage — skew, JPEG, sensor noise — to find where it breaks:
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py --sweep .corpus/wiki_bn.pdf 5 ben
+```
+
+Character overlap, by condition:
+
+| condition | eng | ben | ara |
+|---|---|---|---|
+| clean | 0.999 | 0.986 | 0.922 |
+| skew 1.5° | 0.999 | 0.980 | 0.912 |
+| jpeg q40 | 0.999 | 0.984 | 0.924 |
+| noise σ12 | 0.999 | 0.986 | 0.937 |
+| ordinary office scan | 0.996 | 0.985 | 0.908 |
+| **skew 5°** | 0.993 | **0.937** | **0.789** |
+| bad photocopy | 0.758 | **0.000** | 0.289 |
+
+Three things this establishes:
+
+- **Skew is the only degradation that matters.** JPEG q40 and noise σ12 cost essentially nothing; 5° of rotation costs Bengali 0.05 and Arabic 0.13. A deskew step is worth more than any amount of denoising.
+- **Complex scripts have far less margin.** English survives the bad photocopy at 0.758 while Bengali returns *nothing at all*. Robustness measured on Latin does not transfer, which is the same lesson the English-only corpus taught in phase 4.
+- **The last row must fail.** A sweep where every row passes cannot distinguish a robust engine from a harness that is not actually degrading anything — the fixture trap that made this repo's synthetic column tests vacuous. `bad photocopy` is in `DEGRADATIONS` as the harness's own check on itself.
 
 **Not yet acted on:** the pipeline still refuses OCR on any gate-passed page, including these two, so the better text is available only by deliberately discarding the text layer. Making a page with `RTL_VISUAL_ORDER` or `COMBINING_MARK_ORDER` prefer OCR would be a real improvement and a real complication — it needs a rule for which source wins, and both would be `partial` either way.
 
