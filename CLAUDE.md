@@ -215,6 +215,18 @@ On a page whose gate warning is in `REPAIRABLE_CODES`, OCR text becomes `element
 - **Nothing is discarded.** The native text stays in `diagnostic_elements`, so a consumer that disagrees with this trade still has it.
 - **Off by default.** Replacing `exact` text with `inferred` text is never the obvious call.
 
+**Validated on documents nobody constructed for it.** 13 real PDFs pulled from Bangladesh Bank's public circulars (`.corpus/real/`, gitignored), across 6 producers:
+
+| outcome | count | |
+|---|---|---|
+| processed cleanly | 11 | no crash, no error, 6 different producers |
+| `COMBINING_MARK_ORDER` | 1 | `sep272020eefl01_esf_policies.pdf`, Word-produced Bengali policy circular |
+| `NO_TEXT_LAYER` | 1 | `81_Annexure-1.pdf`, producer `SECnvtToPDF` — a genuine scan |
+
+The flagged circular is the important one. Its text layer fails **three ways at once** on a single page, which no synthetic fixture would have combined: characters substituted (`বাংলাশে` for `বাংলাদেশ`), one glyph mapped to a wrong multi-character sequence (`ি` arriving as `ক্র`, so `নীতিমালা` becomes `নীক্রতমালা`), and runs replaced by whitespace. Bengali character *counts* barely change — which is why a volume-based check would miss it entirely and why `--ocr-repair` is judged on readability, not on how much text it adds. OCR reads the page correctly.
+
+Two things this corrects. **Word is not the problem** — 7 of the 13 are Word-produced and only one is damaged, so producer alone is not a usable filter. And **scans do occur in the wild** even for someone who owns none: one arrived inside an ordinary circular bundle.
+
 **This is a born-digital feature, not a scanning one.** `word_bn.pdf` is a `PDF 1.7` produced by `Microsoft® Word 2021` — an ordinary emailed document, no scanner involved. The input contract cannot filter this: the damaged file is a valid PDF and passes every format check. Only inspecting the text catches it.
 
 #### Degradation sweep

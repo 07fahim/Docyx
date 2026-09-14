@@ -92,11 +92,28 @@ default pipeline behaves exactly as before.
 using a fake detector; none of them touch a recogniser. Quality is unknown, and
 Tesseract's Bengali accuracy in particular is the assumption most likely to fail.
 
+## First contact with real documents
+
+13 PDFs from Bangladesh Bank's public circulars, 6 producers, run through the
+pipeline without being chosen to prove anything:
+
+- **11 processed cleanly.** No crash, no error. First evidence the pipeline
+  survives documents it was not built against.
+- **1 hit `COMBINING_MARK_ORDER`** — a Word-produced Bengali policy circular
+  whose text layer fails three ways on one page: substituted characters, one
+  glyph mapped to a wrong multi-character sequence, and runs lost to
+  whitespace. `--ocr-repair` reads it correctly.
+- **1 was a genuine scan** (`SECnvtToPDF`), handled as `NO_TEXT_LAYER` and read
+  correctly with `--ocr`.
+
+Corrects two working assumptions: Word is not itself the defect (7 of 13 are
+Word-produced, 1 damaged), and scans turn up in ordinary document bundles even
+when nobody set out to collect them.
+
 ## Next Steps
 
-1. **Run the CLI on real documents**, now including scanned ones via `--ocr`.
-   Every gap recorded here was found by poking at the code; none came from a
-   document someone actually needed to process.
+1. **More real documents, and Arabic ones.** The 13 above are a single source
+   in one country; the Arabic side has no real-world sample at all.
 2. Then, informed by (1): a layout model (fixes the two worst reading-order
    scores and is the author's own field), or the phase-5 UI.
 
