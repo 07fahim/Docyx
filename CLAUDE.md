@@ -107,6 +107,15 @@ Column order **and band order** respect `direction`: `_is_rtl` takes a majority 
 
 `Direction.TTB` text is pulled **out of the cut geometry** and read after the horizontal flow. One vertically-set line — the arXiv stamp down a paper's left margin — has a bbox as tall as the whole text body, so leaving it in bridges the gutter and defeats every column cut on the page. Same failure mode as a full-width rule, same remedy. Measured: this alone cost 0.22 coverage on `arxiv_bert.pdf` p0.
 
+**A layout model was tried against the ceiling and did not lift it.** `DocLayNetDetector` now exists and works, so the long-standing claim "the fix is a layout model emitting `caption` regions through the `detector` seam" became testable. It failed twice over:
+
+- On `wiki_ar.pdf` p6 the model emits **no `Caption` region at all**. It does separate the caption — lines 18, 20 and 22 fall inside *no* region while body lines 19, 21 and 23 all land in one — so the information is there, just not as a label.
+- Grouping lines by region and reading each group contiguously (`scripts/experiment_region_order.py`) scores **worse**: `arxiv_bert.p0` 1.000 → 0.519 tau, `arxiv_bert.p3` 1.000 → 0.473, and `wiki_ar.p6` 0.999 → 0.985 with adjacency unchanged at 0.946. It wrecks two-column pages and does not fix the float it was built for.
+
+The experiment's group ordering is deliberately naive — groups sorted by `(min y, min x)`, which cannot express columns — so the *idea* is not disproven, only this implementation. But the result that matters is the second one: it left `wiki_ar.p6` adjacency exactly where it was. A mechanism that fails on its own motivating case is not being held back by its group-ordering rule.
+
+**Do not re-attempt this without a new idea.** The script is committed so the next attempt starts from a measured baseline rather than the theory.
+
 **Floats are the known ceiling.** `.corpus/truth/wiki_ar.p6.json` scores 0.946 adjacency, and every remaining break is one figure caption whose three lines interleave by `y` with the body text beside them. Geometry cannot separate a float from body prose: the caption is 53px tall against a 1527px block, so `MIN_COLUMN_HEIGHT_RATIO` correctly refuses to call it a column. **Do not loosen that threshold to chase this page** — it would start treating short runs as columns everywhere and cost the pages now at 1.000. The fix is a layout model emitting `caption` regions through the `detector` seam. Truth files use the DocLayNet convention: a caption reads as a contiguous unit, in place, never interleaved.
 
 The wide-table failure ("tabular text cuts into columns and reads down rather than across") **did not reproduce** when measured. `arxiv_gpt3.pdf` p7 is an 8-column table with wide inter-column gaps — the exact shape that should break it — and XY-cut reads it correctly row-wise, 1.000/1.000, where the naive baseline gets 0.832. `MIN_COLUMN_WIDTH_RATIO` 0.25 is doing the work it was added for. Treat this as an unverified risk on denser tables, not a known defect.
