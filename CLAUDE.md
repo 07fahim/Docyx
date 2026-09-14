@@ -54,7 +54,9 @@ Every analyzer takes an optional `detector` and falls back to a stub returning `
 
 `VisualAnalyzer` is the exception: its fallback is a **real OpenCV heuristic**, not an empty stub. It finds `rule` and `figure` elements via morphology. A rule must be both long (`min_rule_ratio`) and thin (`max_rule_thickness`) — without the thinness bound a solid filled block survives the directional opening and is misreported as a rule, suppressing the figure underneath it. Those constructor knobs are the tuning surface.
 
-Table structure lives in `Element.children`: a `table` holds `table_cell` children, each with a `grid` (`row`, `column`, `row_span`, `column_span`). `cells` may be empty when a detector finds the outline but cannot resolve structure.
+**The output states its own coordinate system.** `Page.coordinate_system` carries `{origin, units, reference_resolution}` (§4). The invariant was enforced at every boundary and documented here, but never emitted — a consumer reading the JSON had to already know that `x: 236.29` meant 150-DPI top-left pixels, or guess. It is a field rather than a convention so that rendering at another DPI becomes a value change instead of a silent reinterpretation of every box ever exported.
+
+Table structure lives in `Element.children`: a `table` holds `table_cell` children, each with a `grid` (`row`, `column`, `row_span`, `column_span`). `cells` may be empty when a detector finds the outline but cannot resolve structure. `is_header` distinguishes a header cell from body (§11): Table Transformer detects it as its own class, and the grid builder was binding the flag to `_` and discarding it while the module docstring claimed otherwise.
 
 ### Text granularity
 
@@ -122,7 +124,7 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 
 ### The schema is a published contract
 
-`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` is current — `Provenance.modified_by_user` and `original_text`, additive, so §19 makes it a minor bump.
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` is current — `Page.coordinate_system` and `GridPosition.is_header`, both closing gaps against the spec rather than adding features.
 
 `PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
 

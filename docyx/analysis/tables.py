@@ -16,6 +16,9 @@ class CellDetection:
     row_span: int = 1
     column_span: int = 1
     score: float = 1.0
+    #: Header rather than body (§11, "where detectable"). Defaults False so a
+    #: detector that cannot tell says nothing rather than guessing "body".
+    is_header: bool = False
 
 
 @dataclass
@@ -98,6 +101,7 @@ class TableAnalyzer:
                 column=cell.column,
                 row_span=cell.row_span,
                 column_span=cell.column_span,
+                is_header=cell.is_header,
             ),
         )
 

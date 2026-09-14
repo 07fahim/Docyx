@@ -3,6 +3,7 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
+from docyx.core.constants import CANONICAL_DPI
 from docyx.core.geometry import Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance
 from docyx.schema.errors import PageIssue
@@ -78,6 +79,10 @@ class GridPosition(BaseModel):
     column: int
     row_span: int = 1
     column_span: int = 1
+    #: Header cell rather than body (§11). False when the detector could not
+    #: tell, which is not the same as "known to be body" — but distinguishing
+    #: those would need a third state nothing currently produces.
+    is_header: bool = False
 
 
 class Element(BaseModel):
@@ -117,11 +122,33 @@ class Element(BaseModel):
 Element.model_rebuild()
 
 
+class CoordinateSystem(BaseModel):
+    """What every coordinate on this page means (§4, §16).
+
+    Emitted rather than assumed. The invariant — top-left origin, reference
+    pixels at 150 DPI — is enforced at every boundary in code and stated in
+    CLAUDE.md, but it was never in the output, so a consumer reading the JSON
+    had to already know it or guess from the numbers. For a format whose whole
+    claim is that it describes itself, leaving the unit implicit was the one
+    place it did not.
+
+    Constant in v1. It is a field rather than a documented convention so that
+    rendering at another DPI, or a backend with a bottom-left origin, is a
+    value change instead of a silent reinterpretation of every box ever
+    exported.
+    """
+
+    origin: str = "top_left"
+    units: str = "reference_pixels"
+    reference_resolution: int = CANONICAL_DPI
+
+
 class Page(BaseModel):
     page_number: int
     status: PageStatus
     width: int
     height: int
+    coordinate_system: CoordinateSystem = Field(default_factory=CoordinateSystem)
     source_type: str = "born_digital"
     errors: List[PageIssue] = Field(default_factory=list)
     warnings: List[PageIssue] = Field(default_factory=list)
@@ -130,6 +157,6 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.4"
+    schema_version: str = "1.5"
     document_id: str
     pages: List[Page] = Field(default_factory=list)

@@ -6,7 +6,7 @@ from docyx.core.metadata import (
     Provenance,
     ProvenanceSource,
 )
-from docyx.schema.models import Document, Element, Page, PageStatus
+from docyx.schema.models import Document, Element, GridPosition, Page, PageStatus
 
 
 def test_element_creation():
@@ -67,7 +67,7 @@ def test_page_and_document_serialization():
 
     doc = Document(document_id="doc_123", pages=[page])
 
-    assert doc.schema_version == "1.4"
+    assert doc.schema_version == "1.5"
     assert len(doc.pages) == 1
     assert doc.pages[0].status == PageStatus.OK
     assert len(doc.pages[0].elements) == 1
@@ -75,7 +75,7 @@ def test_page_and_document_serialization():
 
     # Test dict export
     doc_dict = doc.model_dump()
-    assert doc_dict["schema_version"] == "1.4"
+    assert doc_dict["schema_version"] == "1.5"
     assert doc_dict["document_id"] == "doc_123"
     assert "diagnostic_elements" in doc_dict["pages"][0]
     assert doc_dict["pages"][0]["diagnostic_elements"][0]["id"] == "diag_001"
@@ -83,7 +83,7 @@ def test_page_and_document_serialization():
     # Test JSON export
     json_str = doc.model_dump_json()
     data = json.loads(json_str)
-    assert data["schema_version"] == "1.4"
+    assert data["schema_version"] == "1.5"
     assert data["pages"][0]["diagnostic_elements"][0]["id"] == "diag_001"
 
 
@@ -148,3 +148,38 @@ def test_an_untouched_element_carries_no_edit_marks():
 
     assert element.provenance.modified_by_user is False
     assert element.provenance.original_text is None
+
+
+# --- self-describing output (§4) -------------------------------------------
+
+
+def test_every_page_states_what_its_coordinates_mean():
+    """The 150-DPI top-left invariant was enforced everywhere in code and
+    documented in CLAUDE.md, but never emitted — so a consumer reading the JSON
+    had to already know it. For a format whose claim is that it describes
+    itself, the unit was the one thing left implicit."""
+    from docyx.core.constants import CANONICAL_DPI
+
+    page = Page(page_number=1, status=PageStatus.OK, width=1241, height=1754)
+
+    assert page.coordinate_system.origin == "top_left"
+    assert page.coordinate_system.units == "reference_pixels"
+    assert page.coordinate_system.reference_resolution == CANONICAL_DPI
+
+
+def test_coordinate_system_survives_serialisation():
+    """It is only worth adding if it reaches the consumer."""
+    page = Page(page_number=1, status=PageStatus.OK, width=10, height=10)
+
+    assert json.loads(page.model_dump_json())["coordinate_system"]["reference_resolution"] == 150
+
+
+def test_a_header_cell_is_distinguishable_from_a_body_cell():
+    """§11 requires header/body classification where detectable. Table
+    Transformer detects it — `table column header` is its own class — and the
+    grid was dropping the flag on the floor."""
+    cell = GridPosition(row=0, column=0, is_header=True)
+    body = GridPosition(row=1, column=0)
+
+    assert cell.is_header is True
+    assert body.is_header is False, "unknown must not be reported as header"
