@@ -1,11 +1,45 @@
 from typing import List, Sequence, Tuple
 
+from docyx.core.metadata import ProvenanceSource
 from docyx.schema.models import Direction, Element
 
-# Only these carry a reading position. Containers (`layout_region`, `table`) and
-# contained cells are deliberately excluded — numbering a table alongside the
-# text inside it interleaves a box with its own contents.
-ORDERABLE_TYPES = frozenset({"text"})
+# Roles a line of text can carry once a layout model has typed it (§8). A line
+# stays orderable whatever it is called — a title reads before the paragraph
+# under it, and renaming it must not drop it out of the sequence.
+TEXT_ROLES = frozenset(
+    {
+        "text",
+        "title",
+        "section_header",
+        "caption",
+        "footnote",
+        "formula",
+        "list_item",
+        "page_header",
+        "page_footer",
+    }
+)
+
+# Kept for callers that predate roles; `is_orderable` is the real test.
+ORDERABLE_TYPES = TEXT_ROLES
+
+
+def is_orderable(element: Element) -> bool:
+    """Does this element carry a reading position?
+
+    Containers are excluded — numbering a table alongside the text inside it
+    interleaves a box with its own contents.
+
+    Once a layout model can type a LINE as `caption`, the line and the region
+    around it share a type string, so the type alone stops distinguishing them.
+    Provenance does: a detected region comes from `layout_model`, a line comes
+    from the text layer, OCR, or a human. Tested on presence of text first, and
+    rejected — a box a user has just drawn has no text yet and must still take
+    its place in the order.
+    """
+    if element.provenance.source is ProvenanceSource.LAYOUT_MODEL:
+        return False
+    return element.type in TEXT_ROLES
 
 # Two pieces of the same visual line overlap vertically by far more than this.
 # Below it they are separate lines that merely sit close together.
@@ -84,8 +118,8 @@ class ReadingOrderCalculator:
         min_gutter: float = MIN_GUTTER,
         min_row_gap: float = MIN_ROW_GAP,
     ) -> List[Element]:
-        orderable = [el for el in elements if el.type in ORDERABLE_TYPES]
-        others = [el for el in elements if el.type not in ORDERABLE_TYPES]
+        orderable = [el for el in elements if is_orderable(el)]
+        others = [el for el in elements if not is_orderable(el)]
 
         # Vertically-set text is out of the horizontal flow. One such line — an
         # arXiv stamp down a margin — has a bbox as tall as the whole text body,
