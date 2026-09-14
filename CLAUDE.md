@@ -9,7 +9,7 @@ No build step, no packaging (`pyproject.toml` does not exist). Run everything th
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx file.pdf -o out.json   # CLI
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
-.venv/Scripts/python.exe -m pytest -q            # full suite (105 tests, ~55s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (145 tests, ~9s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.3.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -86,20 +86,20 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # R
 
 **What the harness does and does not establish** (audited; read before quoting a number):
 
-- **Quote `tau` and `adj` together.** `adj` is nearly blind to the failure it looks like it catches: swap a page's top and bottom halves — unreadable — and adj still scores ~0.99. Only tau collapses. Pinned by `test_adjacency_is_blind_to_a_swapped_page_but_tau_is_not`. Gain over naive is **+0.158 tau / +0.321 adj**; quoting only the larger is cherry-picking.
+- **Quote `tau` and `adj` together.** `adj` is nearly blind to the failure it looks like it catches: swap a page's top and bottom halves — unreadable — and adj still scores ~0.99. Only tau collapses. Pinned by `test_adjacency_is_blind_to_a_swapped_page_but_tau_is_not`. Gain over naive is **+0.146 tau / +0.329 adj**; quoting only the larger is cherry-picking.
 - **The Docling comparison does not show Docyx ordering better.** 100% of Docling's current deficit is page furniture it declines to emit (the arXiv stamp, a page number) — zero characters are misordered. The supported claim is "neither tool made a detectable ordering error on these pages". The Docyx column is near-tautological: the reference is built from the same lines Docyx orders.
 - **Speed is not a like-for-like ratio.** Default `DocyxPipeline()` runs *stub* layout and table detectors; a full stack attempts strictly more work. Median 0.221 s/page (range 0.140–0.267) for native extraction + render, no models.
-- **Effectively 4 independent documents**, 3 of them two-column arXiv preprints — the layout family XY-cut was designed for. `nasa_budget.pdf`, `rfc9110.pdf` and every Word-produced non-Latin file are present but unlabelled.
+- **8 pages across 5 documents**, 3 of them two-column arXiv preprints — the layout family XY-cut was designed for. Still unlabelled: `rfc9110.pdf`, and every *Word-produced* non-Latin file, which is the producer monoculture `measure_bidi.py` warns about.
 - **Multi-line table cells are the known failure.** `nasa_budget.pdf` p88 scores 0.808/0.706 — the lowest in the set and deliberately so. Its table cells wrap over up to ten lines, so the correct order is cell by cell; `arxiv_gpt3.pdf` p7's cells are single-line, so the correct order there is row-wise. Geometry alone cannot satisfy both without knowing where cell boundaries are, which is what a table model provides. Do not tune thresholds at this — it is the same class as the caption float.
 - **Extraction fidelity is ungradeable here.** The labeller can only permute Docyx's own line list, so over-segmentation, under-segmentation and wrong line text cannot be scored. A dropped line trips the checksum and prompts re-labelling rather than lowering the score.
 
-**Re-run `measure_reading_order.py` before touching the thresholds.** Currently 0.976 tau / 0.957 adjacency on 8 pages — but that is 3 pages of English academic papers, which is an instrument, not a benchmark. Extend it before claiming anything.
+**Re-run `measure_reading_order.py` before touching the thresholds.** Currently 0.976 tau / 0.957 adjacency on 8 pages across 5 documents and 3 scripts. Still an instrument rather than a benchmark: 3 of the 8 are two-column arXiv preprints, the layout family XY-cut was built for.
 
 The superseded metric was *agreement with PyMuPDF* (71.6% → 86.0%). Retired because it is circular: PyMuPDF is a dependency, so the ceiling was "equal PyMuPDF", and the two-column pages where XY-cut legitimately beats it scored as regressions.
 
 Truth files record a hand-verified order plus a checksum of the line inventory; the scorer fails loudly if extraction changes what the lines are, or if an order is not a permutation. **Forms are deliberately absent** — a tax form's 488 lines have no unambiguous linear order, so labelling one would invent truth rather than record it.
 
-Column order respects `direction`: `_is_rtl` takes a majority vote over each block's elements, so an RTL block reads its columns right to left and a mixed page resolves per block.
+Column order **and band order** respect `direction`: `_is_rtl` takes a majority vote over each block's elements, so an RTL block reads its columns right to left and a mixed page resolves per block. Banding ignored it until measured — that reversed every multi-element RTL row and put `wiki_ar.pdf` p6 *below* the naive baseline.
 
 `direction` comes from the line's direction vector (vertical vs horizontal) plus the **Unicode bidi category of the characters**. It deliberately does *not* use the span's `bidi` embedding level: measured on `.corpus/wiki_ar.pdf`, every Arabic span reports `bidi=0`, because the generator baked visual order into the glyph stream and discarded the levels. Trusting it classified all 74 elements on an Arabic page as LTR and left this whole RTL path dead on the documents it exists for.
 
@@ -142,18 +142,39 @@ DocyxPipeline(table_analyzer=TableAnalyzer(detector=TableTransformerDetector()))
 
 **Table Transformer is an object detector, not OCR** — it emits row/column/table *boxes* from the page image and never reads a character from pixels (§2.2). Cell text is joined from the native layer by position in `_populate_cell_text`, so it stays `1.0 / exact` and `ocr`/`visual_inference` remain unused. Verified on a real IRS form: 731 text elements, all `native_pdf`.
 
-The stack is optional by design — core stays at 4 light dependencies (§24). Measured ~1.5s/page on CPU after a one-off weight load.
+The stack is optional by design — core stays at 4 light dependencies (§24). Core throughput is **0.221 s/page median** (`scripts/measure_speed.py`), with stub detectors; the model stack costs far more and has not been timed.
 
 Detectors may declare an `engine` attribute; analyzers report it as `provenance.engine` instead of their own heuristic name. Attributing a model's output to the heuristic it replaced would make §26.11's swappability claim unverifiable.
 
+### Page status and failure isolation
+
+Every page returns a `Page`, whatever happened to it. `_safe_page` wraps the whole
+per-page path, so one corrupt page costs that page and not the document — a
+200-page report with one bad page returns 199 good ones plus a `FAILED` page
+carrying the exception. Codes: `NO_TEXT_LAYER` (gate), `EXTRACTION_FAILED` (text
+layer blew up on a gate-passed page), `PAGE_UNREADABLE` (anything else, including
+an out-of-range page index).
+
+`source_type` is derived, never defaulted: `born_digital`, `scanned` (no text but
+raster content present), `empty` (neither), `unknown` (page unreadable). It sat at
+a hardcoded `born_digital` for three phases, which made it wrong on precisely the
+pages it exists to mark.
+
+**Non-PDF input is rejected at the boundary** in `PDFRenderer`. PyMuPDF also opens
+XPS, EPUB, CBZ and Office documents, so `fitz.open()` succeeding is not evidence of
+a PDF — a `.docx` went through the whole pipeline reported as `ok` before this check
+existed.
+
 ### Known gaps
 
+- **Scanned PDFs fail by design**, and that is most of what people mean by "a PDF I need to extract". Phase 6.
+- **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - No OCR, per v1 scope. `ocr` / `visual_inference` provenance and `inferred` confidence stay unused until phase 6.
 
 ## Planning docs
 
-`.planning/` (GSD workflow: `ROADMAP.md`, `STATE.md`, per-phase dirs) tracks the 6-phase roadmap; phases 1–3 are implemented. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
+`.planning/` (GSD workflow: `ROADMAP.md`, `STATE.md`, per-phase dirs) tracks the 6-phase roadmap; phases 1–4 are complete. Phase 5 is the workspace UI — but the CLI, listed under phase 5, shipped early because being fast and light buys nothing while the tool is import-only. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
 
 - `universal_page_document_metadata_extraction_plan_v6.md` — architecture, pipeline, schema
 - `universal_page_metadata_extraction_tool_uiux_plan_v3.md` — the phase-5 workspace UI
