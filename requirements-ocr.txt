@@ -4,9 +4,10 @@
 # fails the gate exactly as before, which is still a documented outcome rather
 # than a crash.
 #
-# Deliberately NOT torch-based: tesseract is a small C++ binary, so this stays
-# inside §24's resource budget. PaddleOCR and EasyOCR are more accurate on some
-# scripts and cost a ~2 GB dependency tree to find out.
+# Tesseract loads no Python ML framework into the process: ~1.8 GB RSS for
+# EasyOCR and ~950 MB for PaddleOCR against tens of MB here, plus 8-20 s of
+# cold start. That is the §24 argument — runtime footprint, not download size.
+# Both alternatives are likely more accurate on Bengali, which is the trade.
 #
 #   pip install -r requirements.txt -r requirements-ocr.txt
 #
