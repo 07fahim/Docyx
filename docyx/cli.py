@@ -5,6 +5,7 @@
     python -m docyx document.pdf -f markdown      # reconstructed prose
     python -m docyx *.pdf -o results/             # batch, one file each
     python -m docyx document.pdf --pages 0-4,9    # selected pages only
+    python -m docyx scan.pdf --ocr ben            # recognise a scanned page
 
 Exit codes matter more than the output format for anything scripted:
 
@@ -90,6 +91,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--pages", help='zero-based, e.g. "0-4,9"')
     parser.add_argument(
+        "--ocr",
+        metavar="LANG",
+        help=(
+            "recognise text on pages with no text layer, e.g. ben, ara, ben+eng. "
+            "Needs tesseract installed; such pages are `partial`, never `ok`"
+        ),
+    )
+    parser.add_argument(
+        "--ocr-min-confidence",
+        type=float,
+        default=0.4,
+        metavar="N",
+        help="drop recognised lines below this score (0-1, default 0.4)",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="exit 1 if any page is degraded, not only if one fails",
@@ -112,7 +128,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error(f"{args.output} is a file; give a directory for several PDFs")
         args.output.mkdir(parents=True, exist_ok=True)
 
-    pipeline = DocyxPipeline()
+    ocr = None
+    if args.ocr:
+        # Imported here, not at module scope: the OCR stack is optional, and a
+        # missing pytesseract must not stop the CLI running without --ocr.
+        from docyx.analysis.detectors.tesseract import TesseractDetector
+        from docyx.analysis.ocr import OCRAnalyzer
+
+        try:
+            ocr = OCRAnalyzer(
+                detector=TesseractDetector(lang=args.ocr),
+                min_confidence=args.ocr_min_confidence,
+            )
+        except ImportError as exc:
+            parser.error(str(exc))
+
+    pipeline = DocyxPipeline(ocr_analyzer=ocr)
     worst = 0
 
     for pdf in args.pdfs:
