@@ -326,3 +326,26 @@ def test_labelled_regions_are_containers_and_never_numbered():
     by_type = {el.type: el.reading_order for el in ordered}
     assert by_type["text"] == 1
     assert by_type["caption"] is None
+
+
+def test_the_header_flag_survives_the_analyzer():
+    """Pinned because it did not: the grid builder bound the header flag to `_`
+    and dropped it, while its docstring claimed it was carried through. The
+    model detects headers as their own class, so the loss was silent."""
+    def detector(image_bytes):
+        return [
+            TableDetection(
+                bbox=BoundingBox(x=0, y=0, width=100, height=50),
+                score=0.9,
+                cells=[
+                    CellDetection(bbox=BoundingBox(x=0, y=0, width=50, height=10),
+                                  row=0, column=0, is_header=True),
+                    CellDetection(bbox=BoundingBox(x=0, y=10, width=50, height=10),
+                                  row=1, column=0),
+                ],
+            )
+        ]
+
+    table = TableAnalyzer(detector=detector).analyze(b"")[0]
+
+    assert [cell.grid.is_header for cell in table.children] == [True, False]
