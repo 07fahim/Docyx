@@ -99,6 +99,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
+        "--ocr-repair",
+        action="store_true",
+        help=(
+            "also use OCR on pages whose text layer is present but misordered "
+            "(RTL_VISUAL_ORDER, COMBINING_MARK_ORDER); native text is kept in "
+            "diagnostic_elements. Requires --ocr"
+        ),
+    )
+    parser.add_argument(
         "--ocr-min-confidence",
         type=float,
         default=0.4,
@@ -128,6 +137,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error(f"{args.output} is a file; give a directory for several PDFs")
         args.output.mkdir(parents=True, exist_ok=True)
 
+    if args.ocr_repair and not args.ocr:
+        parser.error("--ocr-repair needs --ocr LANG to say which language to recognise")
+
     ocr = None
     if args.ocr:
         # Imported here, not at module scope: the OCR stack is optional, and a
@@ -143,7 +155,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError as exc:
             parser.error(str(exc))
 
-    pipeline = DocyxPipeline(ocr_analyzer=ocr)
+    pipeline = DocyxPipeline(ocr_analyzer=ocr, ocr_repair=args.ocr_repair)
     worst = 0
 
     for pdf in args.pdfs:
