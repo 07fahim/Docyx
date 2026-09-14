@@ -1,5 +1,4 @@
 import fitz
-import unicodedata
 from typing import Any, Dict, List, Optional
 
 from docyx.core.constants import SCALE
@@ -114,14 +113,7 @@ def _direction(line: Dict[str, Any], spans: List[Dict[str, Any]]) -> Direction:
     if abs(dy) > abs(dx):
         return Direction.TTB
 
-    categories = [
-        unicodedata.bidirectional(ch) for ch in "".join(s.get("text", "") for s in spans)
-    ]
-    rtl = sum(1 for c in categories if c in ("R", "AL"))
-    ltr = sum(1 for c in categories if c == "L")
-    if not rtl and not ltr:
-        # Digits, brackets and spaces are bidi-neutral — they take direction
-        # from their surroundings rather than carrying one. A line holding only
-        # neutrals is genuinely unknown, not left-to-right by default.
-        return Direction.UNKNOWN
-    return Direction.RTL if rtl > ltr else Direction.LTR
+    # Only the vertical case needs the PDF's own direction vector; the
+    # left-to-right vs right-to-left question is answered by the characters,
+    # and OCR asks it of the same helper.
+    return Direction.of_text("".join(s.get("text", "") for s in spans))

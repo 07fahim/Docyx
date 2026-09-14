@@ -1,3 +1,4 @@
+import unicodedata
 from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field
@@ -26,6 +27,25 @@ class Direction(str, Enum):
     RTL = "rtl"
     TTB = "ttb"
     UNKNOWN = "unknown"
+
+    @classmethod
+    def of_text(cls, text: str) -> "Direction":
+        """Horizontal direction from the characters themselves.
+
+        Lives here rather than in the extractor because OCR needs the same
+        answer from the same evidence, and ``docyx/pdf/`` is PyMuPDF-contained
+        (LICENSING.md) — an analyzer importing it would drag ``fitz`` outside
+        the boundary.
+
+        Never returns LTR by default: a line of digits and brackets is
+        bidi-neutral, so it is genuinely UNKNOWN.
+        """
+        categories = [unicodedata.bidirectional(ch) for ch in text]
+        rtl = sum(1 for c in categories if c in ("R", "AL"))
+        ltr = sum(1 for c in categories if c == "L")
+        if not rtl and not ltr:
+            return cls.UNKNOWN
+        return cls.RTL if rtl > ltr else cls.LTR
 
 
 class PageStatus(str, Enum):
