@@ -16,3 +16,7 @@ __pycache__/
 !.corpus/truth/
 # Regenerable: .venv-bench/Scripts/python.exe scripts/docling_dump.py <pdf>
 .corpus/docling/
+
+# Tesseract language data, downloaded per machine (11 MB each).
+# TESSDATA_PREFIX points here; see requirements-ocr.txt.
+.tessdata/

@@ -162,7 +162,7 @@ Four rules, none of them negotiable:
 - **OCR runs only on gate-failed pages.** The native layer is exact by construction; re-reading a page that has one would be a straight downgrade. Pinned by `test_native_text_is_never_re_read_from_pixels`.
 - **A recognised page is `partial`, never `ok`.** §24 makes a machine-readable text layer the condition for `ok`, and recognised text does not become one by being good. The gate's `NO_TEXT_LAYER` is demoted from `errors` to an `OCR_TEXT` warning — still true that there's no text layer, no longer true that the page produced nothing, and an `error` on a page with content makes callers throw usable output away.
 - **There is no default recogniser.** `ocr_analyzer` defaults to `None`, so the pipeline behaves exactly as it did before OCR existed. Silently degrading `exact` to `inferred` because someone happened to have tesseract on PATH would make the confidence model unreadable.
-- **Tesseract, deliberately not PaddleOCR/EasyOCR** — on *runtime* footprint, not download size. It loads no Python ML framework into the process: ~1.8 GB RSS for EasyOCR and ~950 MB for PaddleOCR against tens of MB, plus 8–20 s of cold start. (The first version of this note said "~2 GB of torch", which was wrong twice: PaddleOCR runs on PaddlePaddle, and 2 GB is the CUDA build when both install from a CPU index.) **Accuracy on Bengali is the trade, and it is the one that may reverse the decision** — Tesseract is weakest exactly there, and EasyOCR has explicit `bn` support. Swapping costs one file behind the seam.
+- **Tesseract, deliberately not PaddleOCR/EasyOCR** — on *runtime* footprint, not download size. It loads no Python ML framework into the process: ~1.8 GB RSS for EasyOCR and ~950 MB for PaddleOCR against tens of MB, plus 8–20 s of cold start. (The first version of this note said "~2 GB of torch", which was wrong twice: PaddleOCR runs on PaddlePaddle, and 2 GB is the CUDA build when both install from a CPU index.) Bengali accuracy was the trade expected to reverse this decision; **measured, it did not** — 0.987 against a clean reference with `tessdata_best`. Swapping engines still costs one file behind the seam if a real scan says otherwise.
 
 `lang` must match the document. `--ocr eng` on a Bengali scan does not fail — it returns confident Latin gibberish, which is worse. `--ocr-min-confidence` (default 0.4) drops low-scoring lines rather than returning them, because page speckle recognised as a one-character "word" lands mid-column and derails the reading order of everything around it.
 
@@ -172,16 +172,25 @@ Four rules, none of them negotiable:
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/arxiv_attention.pdf 2 eng
 ```
 
-| page | lang | sequence | char overlap | mean conf |
-|---|---|---|---|---|
-| `arxiv_attention.pdf` p2 | eng | 0.959 | 0.999 | 0.918 |
-| `wiki_ar.pdf` p6 | ara | 0.140 | **0.928** | 0.829 |
+| page | lang | native text layer | sequence | char overlap | mean conf |
+|---|---|---|---|---|---|
+| `arxiv_attention.pdf` p2 | eng | clean | 0.959 | 0.999 | 0.918 |
+| `wiki_bn.pdf` p5 | ben | clean | **0.987** | 0.986 | 0.926 |
+| `word_bn.pdf` p0 | ben | `COMBINING_MARK_ORDER` | 0.705 | 0.921 | 0.930 |
+| `wiki_ar.pdf` p6 | ara | `RTL_VISUAL_ORDER` | 0.140 | 0.928 | 0.829 |
 
-**Read those two Arabic numbers together — they are the most useful result here.** The characters agree (0.928) and their order does not (0.140), because on that page *the native layer is the one that is wrong*: it carries `RTL_VISUAL_ORDER`, and OCR recovered logical order from the pixels. The native text reads `م180-161(` where OCR reads `(180-161 م)`. So the script reports both metrics, and a large gap between them is diagnosed as a reordering difference rather than a recognition failure.
+**The two clean-reference rows are the control, and they are what make the other two readable.** Tesseract scores 0.959 and 0.987 where the text layer is trustworthy, so it is not a weak recogniser — which means the low sequence scores on rows 3 and 4 cannot be blamed on it. They are the *reference* being wrong:
 
-Two limits on the numbers: a flattened page is clean, deskewed and noise-free, so these are a **ceiling** — real scans will score lower. And English is 0.959, not 1.0, because OCR also picks up figure labels the native layer has as vector art (`Output Probabilities Linear Nx Nx Positional…`), which inflates the character count without being an error.
+- `word_bn.pdf` native reads `বাাংলাদেশ েক্ষিণ এক্ষশযার`; OCR reads `বাংলাদেশ দক্ষিণ এশিয়ার`, which is correct Bengali. Glyph order vs logical order.
+- `wiki_ar.pdf` native reads `م180-161(`; OCR reads `(180-161 م)`. Visual order vs logical order.
 
-**Bengali is still unmeasured**: `ben.traineddata` is not installed on this machine, and it is the language most likely to decide whether Tesseract is the right engine.
+**So OCR is the only working remedy for the two text-layer defects this project can otherwise only warn about.** `RTL_VISUAL_ORDER` and `COMBINING_MARK_ORDER` are both documented above as unrecoverable from the text layer — recovering them needs the bidi algorithm run backwards, or grapheme reordering, both lossy. Reading the pixels sidesteps the question: the rendered page shows the text as a human reads it. That is a stronger reason for OCR to exist here than scanned-page support, and it was not the reason it was built.
+
+`measure_ocr.py` therefore reports both metrics, and diagnoses a large gap between them as a reordering difference rather than a recognition failure.
+
+Two limits on the numbers. A flattened page is clean, deskewed and noise-free, so these are a **ceiling** — real scans will score lower. And English is 0.959 rather than 1.0 because OCR additionally picks up figure labels that the native layer holds as vector art (`Output Probabilities Linear Nx Nx Positional…`), which is extra content, not an error.
+
+**Not yet acted on:** the pipeline still refuses OCR on any gate-passed page, including these two, so the better text is available only by deliberately discarding the text layer. Making a page with `RTL_VISUAL_ORDER` or `COMBINING_MARK_ORDER` prefer OCR would be a real improvement and a real complication — it needs a rule for which source wins, and both would be `partial` either way.
 
 ### Page status and failure isolation
 
@@ -204,7 +213,7 @@ existed.
 
 ### Known gaps
 
-- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. Measured on flattened born-digital pages only — no real scan has been through it, and Bengali is untested for want of `ben.traineddata`.
+- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. Measured on flattened born-digital pages only — **no real scan has ever been through this pipeline**, so skew, JPEG artefacts and show-through are entirely unrepresented in every number above.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is still unused, and has no planned producer.
