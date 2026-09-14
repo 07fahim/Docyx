@@ -3,6 +3,8 @@ from pathlib import Path
 import fitz
 
 from docyx.core.constants import SCALE
+from docyx.pdf.protocols import TextDocument
+from docyx.pdf.text_extractor import NativeTextExtractor
 
 
 class PDFRenderer:
@@ -42,6 +44,25 @@ class PDFRenderer:
     def page_count(self) -> int:
         """Declared here so callers need not reach through to the fitz document."""
         return len(self.doc)
+
+    def text_document(self) -> TextDocument:
+        """The page-text surface, typed as the protocol rather than as `fitz`.
+
+        `self.doc` stays usable inside docyx/pdf/; callers outside the package
+        take this instead, so the backend type never appears in a signature
+        beyond the boundary that makes the licence decision reversible
+        (LICENSING.md).
+        """
+        return self.doc
+
+    def text_extractor(self) -> NativeTextExtractor:
+        """Built here so the fitz document never leaves this package at all.
+
+        The pipeline previously did `NativeTextExtractor(renderer.doc)`, which
+        put a PyMuPDF object in the hands of a module that is supposed to know
+        only the protocols — the one place the containment claim leaked.
+        """
+        return NativeTextExtractor(self.doc)
 
     def has_images(self, page_num: int) -> bool:
         """Does the page carry raster content? Distinguishes a scan from a

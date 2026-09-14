@@ -20,3 +20,9 @@ __pycache__/
 # Tesseract language data, downloaded per machine (11 MB each).
 # TESSDATA_PREFIX points here; see requirements-ocr.txt.
 .tessdata/
+
+# Tool and installer scratch directories. Swept into a commit by `git add -A`
+# once, which put 3.8 GB of pip HTTP cache into history and made push fail.
+tmppip/
+tmphf/
+.omo/

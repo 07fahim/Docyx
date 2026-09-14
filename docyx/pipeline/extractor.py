@@ -51,7 +51,7 @@ class DocyxPipeline:
         """
         renderer = PDFRenderer(file_path_or_stream)
         try:
-            extractor = NativeTextExtractor(renderer.doc)
+            extractor = renderer.text_extractor()
             doc_model = Document(document_id=document_id, pages=[])
 
             wanted = range(renderer.page_count()) if pages is None else pages
@@ -102,7 +102,7 @@ class DocyxPipeline:
     def _process_page(
         self, renderer: PDFRenderer, extractor: NativeTextExtractor, page_num: int
     ) -> Page:
-        gate_result = self.gate.check_page(renderer.doc, page_num)
+        gate_result = self.gate.check_page(renderer.text_document(), page_num)
 
         # Render unconditionally — visual detection never depends on the gate.
         image_bytes = renderer.render_page(page_num)

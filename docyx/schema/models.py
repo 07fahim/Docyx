@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from docyx.core.geometry import Geometry
-from docyx.core.metadata import Confidence, Provenance
+from docyx.core.metadata import Confidence, ConfidenceType, Provenance
 from docyx.schema.errors import PageIssue
 
 
@@ -95,6 +95,24 @@ class Element(BaseModel):
     # Containment. A `table` holds its `table_cell` children here.
     children: List["Element"] = Field(default_factory=list)
 
+    def edit_text(self, text: str) -> "Element":
+        """Record a human correction to this element's text (§11).
+
+        Kept here rather than left to each caller so an edit is applied one
+        way: the machine's value is preserved on first edit only, so editing
+        twice does not overwrite the original with the first correction.
+
+        Confidence becomes `exact`. A person reading the rendered page is a
+        better authority than any extractor — and on a page whose text layer
+        is damaged or absent, they are the only one.
+        """
+        if not self.provenance.modified_by_user:
+            self.provenance.original_text = self.text
+        self.provenance.modified_by_user = True
+        self.text = text
+        self.confidence = Confidence(value=1.0, type=ConfidenceType.EXACT)
+        return self
+
 
 Element.model_rebuild()
 
@@ -112,6 +130,6 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.3"
+    schema_version: str = "1.4"
     document_id: str
     pages: List[Page] = Field(default_factory=list)

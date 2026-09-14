@@ -122,9 +122,19 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 
 ### The schema is a published contract
 
-`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` is current — `Element.direction` replaced per-element `language`.
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` is current — `Provenance.modified_by_user` and `original_text`, additive, so §19 makes it a minor bump.
 
 `PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
+
+### Human edits are provenance, not overwrites
+
+`Element.edit_text()` (§11) is the one way a correction is applied, so the rules hold everywhere the workspace touches:
+
+- **`provenance.source` never changes.** It records the original producer, which is a fact about history. Rewriting it to `manual` would make a corrected OCR line indistinguishable from one a human drew on a blank scan — and that distinction is what an annotation workflow is built on. `modified_by_user` is the flag; `source=manual` is reserved for elements a human *created*, which arrives with the UI.
+- **`original_text` is written on the first edit only.** The obvious implementation overwrites it every time, which destroys the machine's value on the second save. Pinned by `test_editing_twice_keeps_the_ORIGINAL_not_the_first_correction`.
+- **An edited element becomes `exact` / 1.0.** A person reading the rendered page outranks any extractor, and on a damaged text layer they are the only authority available.
+
+Only text keeps its original. Bbox editing (§10) will set `modified_by_user` without preserving the old geometry — add `original_geometry` when something needs to undo across sessions rather than within one.
 
 ### The text-layer gate has two stages
 
@@ -307,7 +317,7 @@ existed.
 
 **AGPL-3.0** (`LICENSE`), because PyMuPDF is AGPL-or-commercial and the project's stated differentiator is open-source self-hosted operation. See [LICENSING.md](LICENSING.md) for the dependency inventory and what the choice forecloses — notably a proprietary hosted API or closed enterprise deployment, both of which appear in §24's commercialization sketch.
 
-PyMuPDF is confined to [docyx/pdf/](docyx/pdf/); everything outside depends on the protocols in [docyx/pdf/protocols.py](docyx/pdf/protocols.py). **Keep it that way** — that containment is what makes the licence decision reversible for the cost of one package. Any injected layout/table model brings its own licence; that audit is still outstanding.
+PyMuPDF is confined to [docyx/pdf/](docyx/pdf/); everything outside depends on the protocols in [docyx/pdf/protocols.py](docyx/pdf/protocols.py), and `test_pymupdf_stays_inside_docyx_pdf` fails the build if that stops being true. It had already leaked: the pipeline held a raw `fitz.Document` as `renderer.doc` and passed it to two collaborators, so the backend type was in the hands of a module meant to know only the protocols. `PDFRenderer.text_extractor()` and `.text_document()` close it. **Keep it that way** — that containment is what makes the licence decision reversible for the cost of one package. Any injected layout/table model brings its own licence; that audit is still outstanding.
 
 ## v1 scope limits (non-negotiable)
 

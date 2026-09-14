@@ -247,3 +247,28 @@ def test_a_pdf_with_no_pages_is_rejected():
         PDFRenderer(empty)
 
 
+
+
+def test_pymupdf_stays_inside_docyx_pdf():
+    """The licence argument (LICENSING.md) is that swapping the PDF backend
+    costs one package. That is only true while `fitz` is imported nowhere else,
+    and it had leaked: the pipeline held a raw fitz.Document via `renderer.doc`
+    and handed it to two collaborators.
+
+    An import check rather than a review note, because this is the kind of
+    constraint that decays the moment nobody is looking at it.
+    """
+    from pathlib import Path as _Path
+
+    package = _Path("docyx")
+    offenders = [
+        str(path)
+        for path in package.rglob("*.py")
+        if path.parts[1] != "pdf"
+        and any(
+            line.startswith(("import fitz", "from fitz"))
+            for line in path.read_text(encoding="utf-8").splitlines()
+        )
+    ]
+
+    assert not offenders, f"PyMuPDF imported outside docyx/pdf/: {offenders}"
