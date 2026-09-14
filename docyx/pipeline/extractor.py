@@ -20,6 +20,7 @@ class DocyxPipeline:
         table_analyzer: Optional[TableAnalyzer] = None,
         visual_analyzer: Optional[VisualAnalyzer] = None,
         ocr_analyzer: Optional[OCRAnalyzer] = None,
+        ocr_repair: bool = False,
     ):
         self.gate = TextLayerGate()
         self.layout_analyzer = layout_analyzer or LayoutAnalyzer()
@@ -30,6 +31,9 @@ class DocyxPipeline:
         # because someone happened to have tesseract installed would make the
         # confidence model unreadable. Opt in explicitly.
         self.ocr_analyzer = ocr_analyzer
+        # Off by default: replacing exact text with inferred text is never the
+        # obvious call, even when the exact text is demonstrably misordered.
+        self.ocr_repair = ocr_repair
 
     def process(
         self,
@@ -86,6 +90,14 @@ class DocyxPipeline:
                     )
                 ],
             )
+
+    def _repairs(self, gate_result) -> bool:
+        return (
+            self.ocr_repair
+            and self.ocr_analyzer is not None
+            and gate_result.warning is not None
+            and gate_result.warning.code in REPAIRABLE_CODES
+        )
 
     def _process_page(
         self, renderer: PDFRenderer, extractor: NativeTextExtractor, page_num: int
@@ -191,6 +203,45 @@ class DocyxPipeline:
                 diagnostic_elements=detected,
             )
 
+        # The text layer is present and readable, but stored in an order the
+        # document does not mean — visual order for RTL, glyph order for Indic.
+        # Both are documented as unrecoverable FROM THE TEXT LAYER; reading the
+        # pixels sidesteps the question, because the rendered page shows the
+        # text the way a human reads it. Measured: OCR returns correct Bengali
+        # and Arabic where the native layer returns scrambled.
+        if self._repairs(gate_result):
+            repaired, warning = _safely(
+                "ocr", self.ocr_analyzer.analyze, image_bytes, page_num
+            )
+            if warning:
+                warnings.append(warning)
+            if repaired:
+                return Page(
+                    page_number=page_num + 1,
+                    # Already PARTIAL from the gate warning, so preferring OCR
+                    # costs no status: the page was never going to be `ok`.
+                    status=PageStatus.PARTIAL,
+                    width=width,
+                    height=height,
+                    warnings=warnings
+                    + [
+                        PageIssue(
+                            code="OCR_REPAIRED",
+                            stage="ocr",
+                            message=(
+                                f"text layer was {gate_result.warning.code}; elements hold "
+                                f"{len(repaired)} recognised lines (`inferred`) and the "
+                                "native text is kept in diagnostic_elements"
+                            ),
+                        )
+                    ],
+                    elements=ReadingOrderCalculator.calculate(repaired + detected),
+                    # Nothing is discarded. The native text is exact — it is
+                    # only its ORDER that is wrong — so a consumer that can
+                    # undo the reordering itself still has everything it needs.
+                    diagnostic_elements=native,
+                )
+
         elements = ReadingOrderCalculator.calculate(native + detected)
         _populate_cell_text(elements)
         return Page(
@@ -203,6 +254,14 @@ class DocyxPipeline:
             warnings=warnings,
             elements=elements,
         )
+
+
+#: Gate warnings that OCR can actually fix. Both mean "every character is
+#: present and correct, but in the wrong order" — which is exactly what
+#: re-reading the rendered page recovers. TEXT_LAYER_SUSPECT is deliberately
+#: absent: there the characters themselves are wrong, and OCR might help or
+#: might not, so it is not a case this can decide unattended.
+REPAIRABLE_CODES = frozenset({"RTL_VISUAL_ORDER", "COMBINING_MARK_ORDER"})
 
 
 def _safely(

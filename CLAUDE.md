@@ -200,6 +200,23 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/arxiv_atten
 
 English is 0.959 rather than 1.0 because OCR additionally picks up figure labels that the native layer holds as vector art (`Output Probabilities Linear Nx Nx Positional…`), which is extra content, not an error.
 
+#### `--ocr-repair`
+
+The finding above is wired up, behind its own flag:
+
+```bash
+python -m docyx word_bn.pdf --ocr ben --ocr-repair
+```
+
+On a page whose gate warning is in `REPAIRABLE_CODES`, OCR text becomes `elements` and the native text moves to `diagnostic_elements`. Verified end to end on `.corpus/word_bn.pdf` p0 — native `বাাংলাদেশ েক্ষিণ এক্ষশযার`, repaired `বাংলাদেশ দক্ষিণ এশিয়ার`.
+
+- **Only two codes qualify.** `RTL_VISUAL_ORDER` and `COMBINING_MARK_ORDER` are the cases where the text layer is untrustworthy but the *rendering* is correct. `TEXT_LAYER_SUSPECT` is deliberately excluded: there the glyphs themselves may be undecodable, so OCR might help or might not, and that is not a call to make unattended.
+- **The status contract does not move.** Such a page is already `partial` from its warning, so preferring OCR costs nothing that was not already lost.
+- **Nothing is discarded.** The native text stays in `diagnostic_elements`, so a consumer that disagrees with this trade still has it.
+- **Off by default.** Replacing `exact` text with `inferred` text is never the obvious call.
+
+**This is a born-digital feature, not a scanning one.** `word_bn.pdf` is a `PDF 1.7` produced by `Microsoft® Word 2021` — an ordinary emailed document, no scanner involved. The input contract cannot filter this: the damaged file is a valid PDF and passes every format check. Only inspecting the text catches it.
+
 #### Degradation sweep
 
 A flattened page is clean, deskewed and noise-free, so every number above is a **ceiling**. `--sweep` re-runs each page through synthetic scanner damage — skew, JPEG, sensor noise — to find where it breaks:
