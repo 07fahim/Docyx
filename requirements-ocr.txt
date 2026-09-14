@@ -1,0 +1,21 @@
+# Optional OCR backend for the OCRAnalyzer detector seam.
+#
+# The core pipeline does NOT need these. Without them a page with no text layer
+# fails the gate exactly as before, which is still a documented outcome rather
+# than a crash.
+#
+# Deliberately NOT torch-based: tesseract is a small C++ binary, so this stays
+# inside §24's resource budget. PaddleOCR and EasyOCR are more accurate on some
+# scripts and cost a ~2 GB dependency tree to find out.
+#
+#   pip install -r requirements.txt -r requirements-ocr.txt
+#
+# The engine itself is not a pip package and must be installed separately,
+# along with one language file per script you need:
+#
+#   Windows:  winget install UB-Mannheim.TesseractOCR
+#   Debian:   apt install tesseract-ocr tesseract-ocr-ben tesseract-ocr-ara
+#   macOS:    brew install tesseract tesseract-lang
+
+pytesseract>=0.3.10
+pillow>=10.0
