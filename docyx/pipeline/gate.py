@@ -80,8 +80,8 @@ class TextLayerGate:
                     message=(
                         "combining marks appear before the characters they attach to; "
                         "the text layer is in glyph order rather than logical order, so "
-                        "words in reordering scripts (Bengali, Devanagari, Thai) are "
-                        "scrambled. Characters may also be missing outright — this is a "
+                        "words in reordering scripts (Bengali, Devanagari, Tamil, Telugu) "
+                        "are scrambled. Characters may also be missing outright — this is a "
                         "symptom of a broken font mapping, not only of ordering, and the "
                         "text is not recoverable by rearranging it"
                     ),
@@ -159,10 +159,22 @@ def _rtl_visual_order(text: str) -> bool:
 def _combining_mark_order(text: str, ratio: float = 0.02) -> bool:
     """Is the text in glyph order rather than logical order?
 
-    Indic and South-East Asian scripts reorder on display: in বাংলা the vowel
-    sign is typed after its consonant and drawn before it. A producer that
-    writes glyph order therefore emits the mark first — and a dependent vowel
-    sign can never legitimately begin a word, which makes this cheap to spot.
+    Indic scripts reorder on display: in বাংলা the vowel sign is typed after
+    its consonant and drawn before it. A producer that writes glyph order
+    therefore emits the mark first — and a dependent vowel sign can never
+    legitimately begin a word, which makes this cheap to spot.
+
+    Script coverage is decided by Unicode category, not by a script list, so it
+    is not Bengali-specific. Verified to fire on deliberately scrambled
+    Bengali, Devanagari, Tamil and Telugu.
+
+    **Thai and Lao are out of scope, and not by oversight.** Their pre-base
+    vowels (เ แ โ ใ ไ) are category Lo rather than Mn/Mc, so this test can
+    never see them — but they also need no detection: Unicode stores those
+    vowels *before* the consonant by design, so `เรียน` beginning with `เ` is
+    correct, not scrambled. An earlier version of this docstring listed Thai as
+    covered; treating a leading Thai vowel as an orphan would have flagged
+    every correct Thai page in existence.
 
     Measured: Word-produced Bengali scores 8.3%, the same language from Chrome
     scores 0%, and Arabic and Latin score 0%. So the defect is a property of

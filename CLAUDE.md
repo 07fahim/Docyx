@@ -121,6 +121,12 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 
 Presence, then quality (§18.3). Quality now covers two independent failures, and `GateResult` carries one warning, so the more severe (garbled text) wins.
 
+**Script coverage is decided by Unicode category, not by a script list**, so neither check is specific to the language it was written against. Verified by parametrised tests in [tests/test_gate.py](tests/test_gate.py): glyph-order scrambling is caught in Bengali, Devanagari, Tamil and Telugu; visual order is caught in Hebrew, Urdu and Persian as well as Arabic; `Direction.of_text` classifies nine scripts correctly.
+
+**Thai is the trap, and it must stay uncovered.** Its pre-base vowels (`เ แ โ ใ ไ`) are category `Lo` rather than `Mn`/`Mc`, so `_combining_mark_order` cannot see them — but they need no detection, because *Unicode stores those vowels before the consonant by design*. `เรียน` beginning with `เ` is correct Thai. An earlier version of the docstring listed Thai as a covered script; "fixing" that by adding `U+0E40..U+0E44` to the orphan test would have flagged every correct Thai page in existence. Pinned by `test_thai_leading_vowels_must_never_be_flagged`.
+
+Detection generalising is not the same as *OCR accuracy* generalising: that is measured for `eng`, `ben` and `ara` only, and needs a document plus a language file per script to extend.
+
 Run `scripts/measure_bidi.py` before trusting any RTL or Indic claim: it groups the corpus by `/Producer`, because **bidi and reordering behaviour is a property of the writing tool, not the script**. It warns on a producer monoculture, which is how the first version of these findings turned out to be Chrome-specific until Word was added.
 
 **`COMBINING_MARK_ORDER`** — the text layer is in glyph order, not logical order. Indic and SE-Asian scripts reorder on display (in বাংলা the vowel sign is typed after its consonant and drawn before it), and a dependent vowel sign can never legitimately begin a word. Measured: **Word-produced Bengali 8.3% word-initial marks, the same language from Chrome 0%**, Arabic and Latin 0%. Every character decodes, so `TEXT_LAYER_SUSPECT`'s replacement-character heuristic is blind to it. This was silently returning scrambled Bengali as `ok` with `confidence 1.0 / exact`.

@@ -172,3 +172,78 @@ def test_rtl_inside_a_mostly_latin_line_is_still_flagged():
     assert _rtl_visual_order("See note ]12[ in العربية for details") is True
     assert _rtl_visual_order("See note [12] in العربية for details") is False
     assert _rtl_visual_order("see b) above and item 3] here") is False
+
+
+# --- script coverage -------------------------------------------------------
+#
+# Added because "you only check Bengali" was a fair charge. The logic keys on
+# Unicode categories rather than a script list, so it should generalise — these
+# tests assert that it actually does, and record the one script it must NOT
+# fire on.
+
+
+@pytest.mark.parametrize(
+    "script,scrambled",
+    [
+        ("Bengali", "োব ংলােদশ িদক্ষণ"),
+        ("Devanagari", "िहन्दी ीदिल्ली"),
+        ("Tamil", "ெசன்னை ெபரிய"),
+        ("Telugu", "ెతలుగు ొకత్త"),
+    ],
+)
+def test_glyph_order_is_detected_beyond_bengali(script, scrambled):
+    """Every Indic script that places a vowel sign before its consonant on
+    screen can be emitted in that order by a bad producer."""
+    from docyx.pipeline.gate import _combining_mark_order
+
+    assert _combining_mark_order(scrambled) is True, f"{script} went undetected"
+
+
+def test_thai_leading_vowels_must_never_be_flagged():
+    """Thai is the trap. Its pre-base vowels are category Lo, not Mn/Mc, AND
+    Unicode stores them before the consonant by design — so a Thai word
+    beginning with one is correct, not scrambled.
+
+    An earlier docstring claimed Thai was covered. "Fixing" that by adding
+    U+0E40..U+0E44 to the orphan test would have flagged every correct Thai
+    page in existence.
+    """
+    from docyx.pipeline.gate import _combining_mark_order
+
+    assert _combining_mark_order("เรียน แบบ โลก ใหม่ ไทย") is False
+
+
+@pytest.mark.parametrize(
+    "script,text",
+    [
+        ("Hebrew", "שלום ]5[ )2021( עולם"),
+        ("Urdu", "اردو ]5[ )2021( زبان"),
+        ("Persian", "فارسی ]5[ زبان"),
+    ],
+)
+def test_visual_order_is_detected_beyond_arabic(script, text):
+    """The check keys on the Unicode bidi category, so every right-to-left
+    script is covered, not only the one it was written against."""
+    from docyx.pipeline.gate import _rtl_visual_order
+
+    assert _rtl_visual_order(text) is True, f"{script} went undetected"
+
+
+@pytest.mark.parametrize(
+    "script,text,expected",
+    [
+        ("Hindi", "हिन्दी भारत की राजभाषा है", "ltr"),
+        ("Thai", "ภาษาไทยเป็นภาษาราชการ", "ltr"),
+        ("Hebrew", "שלום עולם זהו טקסט", "rtl"),
+        ("Urdu", "اردو پاکستان کی قومی زبان ہے", "rtl"),
+        ("Chinese", "中文是世界上使用人数最多的语言", "ltr"),
+        ("Japanese", "日本語のテキストです", "ltr"),
+        ("Korean", "한국어 텍스트입니다", "ltr"),
+        ("Russian", "Это русский текст", "ltr"),
+        ("Greek", "Αυτό είναι ελληνικό κείμενο", "ltr"),
+    ],
+)
+def test_direction_covers_every_script_not_just_the_measured_ones(script, text, expected):
+    from docyx.schema.models import Direction
+
+    assert Direction.of_text(text).value == expected, f"{script} misclassified"
