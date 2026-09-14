@@ -29,6 +29,11 @@ class PDFRenderer:
         """Declared here so callers need not reach through to the fitz document."""
         return len(self.doc)
 
+    def has_images(self, page_num: int) -> bool:
+        """Does the page carry raster content? Distinguishes a scan from a
+        genuinely blank page, both of which fail the text-layer gate."""
+        return bool(self.doc[page_num].get_images())
+
     def render_page(self, page_num: int) -> bytes:
         return self._pixmap(page_num).tobytes("png")
 

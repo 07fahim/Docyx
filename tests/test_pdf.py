@@ -158,3 +158,64 @@ def test_a_non_pdf_is_rejected_rather_than_processed(tmp_path):
 
     with pytest.raises(ValueError, match="not a PDF"):
         DocyxPipeline().process(str(not_a_pdf), document_id="nope")
+
+
+def test_a_page_with_no_text_layer_is_not_called_born_digital(tmp_path):
+    """source_type was in the published schema, defaulted to 'born_digital',
+    and never assigned — so a scanned page, the one case the field exists to
+    mark, reported the opposite of the truth. A consumer asking "which pages
+    need OCR?" got the wrong answer on every one."""
+    doc = fitz.open()
+    page = doc.new_page()
+    blank = fitz.open()
+    pix = blank.new_page().get_pixmap()
+    page.insert_image(page.rect, stream=pix.tobytes("png"))
+    pdf = tmp_path / "scan.pdf"
+    doc.save(str(pdf))
+    doc.close()
+
+    result = DocyxPipeline().process(str(pdf), document_id="scan").pages[0]
+
+    assert result.status is PageStatus.FAILED
+    assert result.source_type == "scanned"
+
+
+def test_born_digital_pages_still_say_so(sample_pdf_path):
+    page = DocyxPipeline().process(str(sample_pdf_path), document_id="d").pages[0]
+    assert page.source_type == "born_digital"
+
+
+def test_one_unreadable_page_does_not_lose_the_whole_document(tmp_path, monkeypatch):
+    """The stated invariant is 'partial results, never reject the whole
+    document', but only the three detectors were wrapped. A raise from
+    rendering or from text extraction propagated out of process(), so the
+    caller got an exception instead of a Document with one failed page —
+    losing every other page in a 200-page report to one corrupt one."""
+    doc = fitz.open()
+    for i in range(3):
+        doc.new_page().insert_text((72, 100), f"Page {i} text.", fontsize=11)
+    pdf = tmp_path / "three.pdf"
+    doc.save(str(pdf))
+    doc.close()
+
+    from docyx.pdf import text_extractor as te
+
+    original = te.NativeTextExtractor.extract_page
+
+    def explode(self, page_num):
+        if page_num == 1:
+            raise RuntimeError("corrupt content stream")
+        return original(self, page_num)
+
+    monkeypatch.setattr(te.NativeTextExtractor, "extract_page", explode)
+
+    document = DocyxPipeline().process(str(pdf), document_id="three")
+
+    assert len(document.pages) == 3, "the good pages must survive"
+    assert [p.status for p in document.pages] == [
+        PageStatus.OK,
+        PageStatus.FAILED,
+        PageStatus.OK,
+    ]
+    assert document.pages[1].errors[0].code == "EXTRACTION_FAILED"
+    assert "corrupt content stream" in document.pages[1].errors[0].message

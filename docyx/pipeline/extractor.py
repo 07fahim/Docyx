@@ -45,11 +45,40 @@ class DocyxPipeline:
 
             wanted = range(renderer.page_count()) if pages is None else pages
             for page_num in wanted:
-                doc_model.pages.append(self._process_page(renderer, extractor, page_num))
+                doc_model.pages.append(self._safe_page(renderer, extractor, page_num))
 
             return doc_model
         finally:
             renderer.close()
+
+    def _safe_page(
+        self, renderer: PDFRenderer, extractor: NativeTextExtractor, page_num: int
+    ) -> Page:
+        """One unreadable page must cost that page, not the document.
+
+        "Mixed documents are normal. Partial results, never reject the whole
+        document" only held for the three detectors, which `_safely` wraps.
+        Rendering and text extraction were unguarded, so a single corrupt page
+        raised out of `process()` and took every other page of a 200-page
+        report with it.
+        """
+        try:
+            return self._process_page(renderer, extractor, page_num)
+        except Exception as exc:  # noqa: BLE001 — the page is the blast radius
+            return Page(
+                page_number=page_num + 1,
+                status=PageStatus.FAILED,
+                width=0,
+                height=0,
+                source_type="unknown",
+                errors=[
+                    PageIssue(
+                        code="PAGE_UNREADABLE",
+                        stage="page_processing",
+                        message=f"{type(exc).__name__}: {exc}",
+                    )
+                ],
+            )
 
     def _process_page(
         self, renderer: PDFRenderer, extractor: NativeTextExtractor, page_num: int
@@ -86,12 +115,36 @@ class DocyxPipeline:
                 status=PageStatus.FAILED,
                 width=width,
                 height=height,
+                # The field exists to mark exactly this page. It defaulted to
+                # born_digital and was never assigned, so the one case it was
+                # for reported the opposite of the truth.
+                source_type="scanned" if renderer.has_images(page_num) else "empty",
                 errors=[gate_result.error],
                 warnings=warnings,
                 diagnostic_elements=detected,
             )
 
-        elements = ReadingOrderCalculator.calculate(extractor.extract_page(page_num) + detected)
+        try:
+            native = extractor.extract_page(page_num)
+        except Exception as exc:  # noqa: BLE001 — see _safe_page
+            return Page(
+                page_number=page_num + 1,
+                status=PageStatus.FAILED,
+                width=width,
+                height=height,
+                source_type="born_digital",
+                errors=[
+                    PageIssue(
+                        code="EXTRACTION_FAILED",
+                        stage="text_extraction",
+                        message=f"{type(exc).__name__}: {exc}",
+                    )
+                ],
+                warnings=warnings,
+                diagnostic_elements=detected,
+            )
+
+        elements = ReadingOrderCalculator.calculate(native + detected)
         _populate_cell_text(elements)
         return Page(
             page_number=page_num + 1,
