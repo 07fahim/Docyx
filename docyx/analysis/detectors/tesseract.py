@@ -1,9 +1,21 @@
 """Tesseract behind the `OCRAnalyzer` detector seam.
 
-Chosen over PaddleOCR/EasyOCR because it is the only mainstream engine that
-needs no torch and no GPU: a ~5 MB C++ binary plus one ~2-15 MB language file
-each. That keeps §24's resource-lightness intact — the constraint that ruled
-out the model-benchmark work in phase 4.
+Chosen over PaddleOCR/EasyOCR on *runtime* footprint, not download size: it is
+the only mainstream engine that loads no Python ML framework into the process.
+EasyOCR sits around 1.8 GB RSS after init and PaddleOCR around 950 MB, with
+8-20 s of cold start; Tesseract is tens of MB and starts immediately. That
+keeps §24's resource-lightness intact — the constraint that ruled out the
+model-benchmark work in phase 4.
+
+Two corrections to the reasoning as first recorded, since it was wrong: PaddleOCR
+runs on PaddlePaddle, not torch, and the "~2 GB" figure was CUDA-bundled torch
+when both alternatives install fine from a CPU index. Download size was never the
+real difference.
+
+**The open question is accuracy on Bengali, where Tesseract is weakest and
+EasyOCR has explicit `bn` support.** If that is what decides it, footprint is
+the wrong axis and this adapter is the wrong choice — which is why the engine
+sits behind `OCRAnalyzer`'s detector seam and costs one file to replace.
 
 Install (the binary is NOT a pip package):
 
@@ -18,11 +30,32 @@ does not fail — it returns confident Latin gibberish, which is worse.
 """
 
 import io
+import os
+import shutil
 from collections import OrderedDict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from docyx.analysis.ocr import OCRLine
 from docyx.core.geometry import BoundingBox
+
+# The Windows installer does not add itself to PATH, so `pip install` succeeds,
+# the binary is present, and pytesseract still raises TesseractNotFoundError.
+# Measured on the author's own machine — this is the default experience, not an
+# edge case, so probe the standard locations rather than making every user
+# discover the same thing.
+_WINDOWS_DEFAULTS = (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+)
+
+
+def _find_binary() -> Optional[str]:
+    """PATH, then $TESSERACT_CMD, then the usual Windows install locations."""
+    return (
+        shutil.which("tesseract")
+        or os.environ.get("TESSERACT_CMD")
+        or next((p for p in _WINDOWS_DEFAULTS if os.path.isfile(p)), None)
+    )
 
 
 def _require_deps():
@@ -49,10 +82,28 @@ class TesseractDetector:
     #: Reported as provenance.engine, so output traces to the recogniser.
     engine = "tesseract"
 
-    def __init__(self, lang: str = "eng", config: str = ""):
+    def __init__(self, lang: str = "eng", config: str = "", binary: Optional[str] = None):
         _require_deps()
+        import pytesseract
+
+        found = binary or _find_binary()
+        if not found:
+            raise ImportError(
+                "tesseract binary not found on PATH, in $TESSERACT_CMD, or at the "
+                "default install location. Install it (winget install "
+                "UB-Mannheim.TesseractOCR) or pass binary=<path>."
+            )
+        pytesseract.pytesseract.tesseract_cmd = found
+
         self.lang = lang
         self.config = config
+        self.binary = found
+
+    def languages(self) -> List[str]:
+        """Language files actually installed. `lang` must be a subset of these."""
+        import pytesseract
+
+        return list(pytesseract.get_languages(config=""))
 
     def __call__(self, image_bytes: bytes) -> List[OCRLine]:
         import pytesseract
