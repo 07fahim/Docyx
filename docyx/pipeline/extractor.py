@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 from docyx.analysis.layout import LayoutAnalyzer
@@ -53,7 +54,17 @@ class DocyxPipeline:
         renderer = PDFRenderer(file_path_or_stream)
         try:
             extractor = renderer.text_extractor()
-            doc_model = Document(document_id=document_id, pages=[])
+            doc_model = Document(
+                document_id=document_id,
+                filename=Path(file_path_or_stream).name
+                if isinstance(file_path_or_stream, (str, Path))
+                else None,
+                # The document's own length, not len(pages): with `pages` set,
+                # those differ, and a caller must be able to tell a 3-page
+                # document from three pages of a 300-page one.
+                page_count=renderer.page_count(),
+                pages=[],
+            )
 
             wanted = range(renderer.page_count()) if pages is None else pages
             for page_num in wanted:

@@ -18,7 +18,7 @@ from typing import Callable, List, Optional
 
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
-from docyx.schema.models import Direction, Element
+from docyx.schema.models import Direction, Element, script_of
 
 
 @dataclass
@@ -79,6 +79,7 @@ class OCRAnalyzer:
                     # font that drew them. Leaving it None keeps the markdown
                     # heading heuristic from inventing structure from nothing.
                     direction=Direction.of_text(line.text),
+                    script=script_of(line.text),
                 )
             )
         return elements

@@ -1,3 +1,4 @@
+import pytest
 import json
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import (
@@ -67,7 +68,7 @@ def test_page_and_document_serialization():
 
     doc = Document(document_id="doc_123", pages=[page])
 
-    assert doc.schema_version == "1.5"
+    assert doc.schema_version == "1.6"
     assert len(doc.pages) == 1
     assert doc.pages[0].status == PageStatus.OK
     assert len(doc.pages[0].elements) == 1
@@ -75,7 +76,7 @@ def test_page_and_document_serialization():
 
     # Test dict export
     doc_dict = doc.model_dump()
-    assert doc_dict["schema_version"] == "1.5"
+    assert doc_dict["schema_version"] == "1.6"
     assert doc_dict["document_id"] == "doc_123"
     assert "diagnostic_elements" in doc_dict["pages"][0]
     assert doc_dict["pages"][0]["diagnostic_elements"][0]["id"] == "diag_001"
@@ -83,7 +84,7 @@ def test_page_and_document_serialization():
     # Test JSON export
     json_str = doc.model_dump_json()
     data = json.loads(json_str)
-    assert data["schema_version"] == "1.5"
+    assert data["schema_version"] == "1.6"
     assert data["pages"][0]["diagnostic_elements"][0]["id"] == "diag_001"
 
 
@@ -183,3 +184,61 @@ def test_a_header_cell_is_distinguishable_from_a_body_cell():
 
     assert cell.is_header is True
     assert body.is_header is False, "unknown must not be reported as header"
+
+
+# --- typography flags and script (§7) --------------------------------------
+
+
+def test_bold_and_italic_are_decoded_from_the_flag_bits():
+    """§7 asks for bold and italic by name. Making a consumer decode a PyMuPDF
+    bitfield to get them is not structured output."""
+    from docyx.schema.models import Typography
+
+    both = Typography(flags=18)  # bit 1 italic + bit 4 bold
+    assert (both.bold, both.italic) == (True, True)
+
+    plain = Typography(flags=0)
+    assert (plain.bold, plain.italic) == (False, False)
+
+
+def test_unknown_typography_is_none_not_false():
+    """"This PDF did not say" is a different claim from "this text is not
+    bold", and a schema built on provenance must not collapse them."""
+    from docyx.schema.models import Typography
+
+    assert Typography(font_family="X").bold is None
+
+
+def test_flags_and_the_named_fields_cannot_disagree():
+    """Derived, not stored alongside — so there is no second source of truth
+    to drift."""
+    from docyx.schema.models import Typography
+
+    assert json.loads(Typography(flags=16).model_dump_json())["bold"] is True
+
+
+@pytest.mark.parametrize(
+    "text,script",
+    [
+        ("Attention Is All You Need", "latin"),
+        ("বাংলাদেশ দক্ষিণ", "bengali"),
+        ("مرحبا بالعالم", "arabic"),
+        ("हिन्दी", "devanagari"),
+        ("Ελληνικά", "greek"),
+        ("2021 [5] (—)", None),
+    ],
+)
+def test_script_is_derived_not_guessed(text, script):
+    """§7 asks for `language`; this is deliberately not that. A PDF carries no
+    language, so "en" could only come from statistical detection — a guess,
+    which cannot sit in a schema where every value declares its reliability.
+    Script IS in the characters: Unicode names U+0995 BENGALI LETTER KA."""
+    from docyx.schema.models import script_of
+
+    assert script_of(text) == script
+
+
+def test_script_cannot_distinguish_languages_and_does_not_try():
+    from docyx.schema.models import script_of
+
+    assert script_of("the quick brown fox") == script_of("le renard brun rapide")

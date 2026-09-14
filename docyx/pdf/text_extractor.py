@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from docyx.core.constants import SCALE
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
-from docyx.schema.models import Direction, Element, Typography
+from docyx.schema.models import Direction, Element, Typography, script_of
 
 
 class NativeTextExtractor:
@@ -56,6 +56,7 @@ class NativeTextExtractor:
                     text=text,
                     typography=_dominant_typography(spans),
                     direction=_direction(line, spans),
+                    script=script_of(text),
                 )
                 elements.append(element)
         return elements
