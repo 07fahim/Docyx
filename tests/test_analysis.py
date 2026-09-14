@@ -349,3 +349,70 @@ def test_the_header_flag_survives_the_analyzer():
     table = TableAnalyzer(detector=detector).analyze(b"")[0]
 
     assert [cell.grid.is_header for cell in table.children] == [True, False]
+
+
+# --- semantic roles on text (§5, §8) ---------------------------------------
+
+
+def _line(x, y, text="a line"):
+    return Element(
+        id=f"l{x}_{y}", type="text",
+        geometry=Geometry(bbox=BoundingBox(x=x, y=y, width=40, height=10)),
+        confidence=Confidence(value=1.0, type=ConfidenceType.EXACT),
+        provenance=Provenance(source=ProvenanceSource.NATIVE_PDF),
+        text=text,
+    )
+
+
+def _region(x, y, w, h, label):
+    return Element(
+        id=f"r{label}", type=label,
+        geometry=Geometry(bbox=BoundingBox(x=x, y=y, width=w, height=h)),
+        confidence=Confidence(value=0.9, type=ConfidenceType.DETECTED),
+        provenance=Provenance(source=ProvenanceSource.LAYOUT_MODEL),
+    )
+
+
+def test_a_line_takes_the_type_of_its_region():
+    from docyx.pipeline.extractor import _assign_roles
+
+    line = _line(10, 10)
+    _assign_roles([line], [_region(0, 0, 200, 200, "caption")])
+
+    assert line.type == "caption"
+
+
+def test_the_smallest_containing_region_wins():
+    """Regions nest — a caption sits inside the column region around it — so the
+    innermost is the specific one. Measured need: a real layout model returned a
+    706px-tall `page_header` covering half a paper's first page, and without
+    this rule it would have retyped dozens of body lines as page furniture."""
+    from docyx.pipeline.extractor import _assign_roles
+
+    line = _line(10, 10)
+    _assign_roles([line], [_region(0, 0, 500, 500, "page_header"),
+                           _region(0, 0, 100, 100, "caption")])
+
+    assert line.type == "caption"
+
+
+def test_a_line_in_no_region_stays_text():
+    """A model that misses a region must not silently retype prose."""
+    from docyx.pipeline.extractor import _assign_roles
+
+    line = _line(900, 900)
+    _assign_roles([line], [_region(0, 0, 100, 100, "title")])
+
+    assert line.type == "text"
+
+
+def test_a_retyped_line_still_gets_a_reading_position():
+    """Roles reuse the region's type string, so the orderable test can no longer
+    key on `type == "text"` — a title that stops being numbered has been
+    dropped out of the document."""
+    line = _line(10, 10)
+    line.type = "title"
+
+    ordered = ReadingOrderCalculator.calculate([line])
+
+    assert ordered[0].reading_order == 1

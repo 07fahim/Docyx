@@ -2,10 +2,11 @@ from typing import Callable, Iterable, List, Optional, Tuple, Union
 
 from docyx.analysis.layout import LayoutAnalyzer
 from docyx.analysis.ocr import OCRAnalyzer
-from docyx.analysis.reading_order import ReadingOrderCalculator
+from docyx.analysis.reading_order import TEXT_ROLES, ReadingOrderCalculator
 from docyx.analysis.tables import TableAnalyzer
 from docyx.analysis.visual import VisualAnalyzer
 from docyx.core.constants import SCALE
+from docyx.core.metadata import ProvenanceSource
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pdf.text_extractor import NativeTextExtractor
 from docyx.pipeline.gate import TextLayerGate
@@ -242,6 +243,7 @@ class DocyxPipeline:
                     diagnostic_elements=native,
                 )
 
+        _assign_roles(native, detected)
         elements = ReadingOrderCalculator.calculate(native + detected)
         _populate_cell_text(elements)
         return Page(
@@ -274,6 +276,42 @@ def _safely(
         return run(image_bytes, page_num=page_num), None
     except Exception as exc:  # a detector failure degrades the page, never the document
         return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))
+
+
+def _assign_roles(text: List[Element], detected: List[Element]) -> None:
+    """Give each line the semantic type of the region containing it (§8).
+
+    Without this a layout model produces boxes nobody consumes: the regions sit
+    beside the text as separate elements, and every line stays `text` whatever
+    the model decided. §5's example shows `"type": "title"` ON the text, which
+    is the useful form — a consumer wants "this line is a heading", not "there
+    is a heading-shaped rectangle somewhere near this line".
+
+    The SMALLEST containing region wins. Regions nest — a caption sits inside
+    the column region around it — and the innermost is the specific one.
+
+    Lines inside no region keep `text`. A model that misses a region must not
+    silently retype prose as something else, and roughly a fifth of lines land
+    outside every detection on a real page.
+    """
+    regions = [
+        el
+        for el in detected
+        if el.provenance.source is ProvenanceSource.LAYOUT_MODEL
+        and el.type in TEXT_ROLES
+    ]
+    if not regions:
+        return
+
+    # Smallest first, so the first hit is the innermost region.
+    regions.sort(key=lambda el: el.geometry.bbox.width * el.geometry.bbox.height)
+    for line in text:
+        box = line.geometry.bbox
+        cx, cy = box.x + box.width / 2, box.y + box.height / 2
+        for region in regions:
+            if region.geometry.bbox.contains(cx, cy):
+                line.type = region.type
+                break
 
 
 def _populate_cell_text(elements: List[Element]) -> None:
