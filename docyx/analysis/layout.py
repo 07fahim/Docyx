@@ -5,10 +5,8 @@ from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
 from docyx.schema.models import Element
 
-#: The DocLayNet vocabulary, which is what every published layout model emits
-#: and what `.corpus/truth/` was labelled against. Kept as data rather than an
-#: enum so a detector with a different vocabulary can map into it without this
-#: module needing to know about it.
+#: The DocLayNet vocabulary. Data rather than an enum so a detector with its
+#: own labels can map into it.
 LAYOUT_LABELS = frozenset(
     {
         "caption",
@@ -25,28 +23,20 @@ LAYOUT_LABELS = frozenset(
     }
 )
 
-#: What an unlabelled or unrecognised detection becomes. This was the ONLY type
-#: this module could ever produce before a label could travel through the seam.
+#: What an unlabelled or unrecognised detection becomes.
 UNTYPED = "layout_region"
 
 
 @dataclass
 class LayoutDetection:
-    """One detected region and what the model thinks it is.
-
-    `label` is the point of a layout model. Without it every region is an
-    untyped rectangle, and the caller cannot tell a caption from a paragraph —
-    which is the distinction reading order needs and geometry cannot supply.
-    """
+    """One detected region and its class."""
 
     bbox: BoundingBox
     score: float
     label: str = UNTYPED
 
 
-#: Detectors return LayoutDetections. Bare `(bbox, score)` tuples are still
-#: accepted because that was the original signature and the seam is public;
-#: they arrive as UNTYPED, which is exactly what they always produced.
+#: Bare `(bbox, score)` tuples remain accepted; they arrive as UNTYPED.
 Detection = Union[LayoutDetection, Tuple[BoundingBox, float]]
 Detector = Callable[[bytes], Sequence[Detection]]
 
@@ -59,17 +49,9 @@ def _normalise(detection: Detection) -> LayoutDetection:
 
 
 class LayoutAnalyzer:
-    """Detects layout regions (caption, title, picture, ...) from a rendered page image.
+    """Detects layout regions from a rendered page image.
 
-    The detector callable performs the actual ML inference. When no detector is
-    supplied, a deterministic heuristic stub is used so the pipeline is fully
-    testable without downloading heavy model weights.
-
-    **Still a stub in practice**: no detector ships, so no layout region is
-    produced by default. The seam is now capable of carrying a label, which it
-    was not before — the docstring promised "heading, figure, paragraph" while
-    the signature could only return a box and a score, so every region came out
-    as an untyped rectangle no matter what the model had decided.
+    No detector ships, so no region is produced by default.
     """
 
     ENGINE = "layout-heuristic-v1"
@@ -78,12 +60,7 @@ class LayoutAnalyzer:
         self._detector = detector
 
     def _engine(self) -> str:
-        """Provenance must name whichever engine actually produced the result.
-
-        A detector may declare its own `engine`; otherwise this is the built-in
-        heuristic. Reporting the heuristic's name for a model's output would
-        make provenance a lie and break the swappability claim (§26.11).
-        """
+        """The detector's own engine name, or the built-in heuristic's."""
         return getattr(self._detector, "engine", None) or self.ENGINE
 
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
@@ -91,9 +68,8 @@ class LayoutAnalyzer:
         elements = []
         for idx, detection in enumerate(raw):
             found = _normalise(detection)
-            # An unknown label is reported as UNTYPED rather than passed
-            # through: `type` is a bare string, so a typo in a detector would
-            # otherwise become a silent new element type that nothing handles.
+            # Unknown labels become UNTYPED: `type` is a bare string, so a
+            # detector typo would otherwise create a silent new type.
             label = found.label if found.label in LAYOUT_LABELS else UNTYPED
             elements.append(
                 Element(

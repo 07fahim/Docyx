@@ -14,11 +14,8 @@ class PDFRenderer:
         else:
             self.doc = fitz.open(stream=file_path_or_stream, filetype="pdf")
 
-        # PyMuPDF opens XPS, EPUB, CBZ and Office documents too, so `open`
-        # succeeding is not evidence of a PDF. v1 is PDF-only, and a .docx went
-        # through the pipeline reported as "1 ok" — every coordinate, every
-        # provenance claim and the schema's meaning assume a PDF page, so a
-        # silent wrong answer is the worst outcome available here.
+        # PyMuPDF also opens XPS, EPUB and Office documents, so `open`
+        # succeeding is not evidence of a PDF.
         if not self.doc.is_pdf:
             fmt = (self.doc.metadata or {}).get("format", "unknown")
             self.doc.close()
@@ -27,13 +24,8 @@ class PDFRenderer:
                 "v1 accepts PDF only"
             )
 
-        # A PDF with no pages opens cleanly, reports is_pdf, and is not
-        # encrypted — it simply has nothing in it. Found on a real 14 MB
-        # Arabic government report whose page tree does not resolve. Left
-        # alone, `process()` returns a Document with zero pages and no error,
-        # and the CLI exits 0 because "every page produced a valid result" is
-        # vacuously true of no pages. Silently reporting success for a file
-        # that produced nothing is the worst outcome available here.
+        # A zero-page PDF opens cleanly. Left alone it returns a Document
+        # with no pages and no error, and the CLI exits 0.
         if len(self.doc) == 0:
             self.doc.close()
             raise ValueError(
@@ -46,22 +38,11 @@ class PDFRenderer:
         return len(self.doc)
 
     def text_document(self) -> TextDocument:
-        """The page-text surface, typed as the protocol rather than as `fitz`.
-
-        `self.doc` stays usable inside docyx/pdf/; callers outside the package
-        take this instead, so the backend type never appears in a signature
-        beyond the boundary that makes the licence decision reversible
-        (LICENSING.md).
-        """
+        """The page-text surface, typed as the protocol rather than as fitz."""
         return self.doc
 
     def text_extractor(self) -> NativeTextExtractor:
-        """Built here so the fitz document never leaves this package at all.
-
-        The pipeline previously did `NativeTextExtractor(renderer.doc)`, which
-        put a PyMuPDF object in the hands of a module that is supposed to know
-        only the protocols — the one place the containment claim leaked.
-        """
+        """Built here so the fitz document never leaves this package."""
         return NativeTextExtractor(self.doc)
 
     def has_images(self, page_num: int) -> bool:
@@ -75,11 +56,8 @@ class PDFRenderer:
     def page_size(self, page_num: int) -> tuple:
         """Rendered extent in 150-DPI pixels.
 
-        Taken from the pixmap rather than computed as int(points * SCALE):
-        rendering rounds where int() truncates, so A4 reported 1239x1754 for an
-        image that is actually 1240x1755. Element coordinates live in pixmap
-        space, so a box on the right margin could exceed the page's own
-        declared width — which the phase-5 overlay would show as drift.
+        From the pixmap, not int(points * SCALE): rendering rounds where int()
+        truncates, so a box on the right margin could exceed the page width.
         """
         pix = self._pixmap(page_num)
         return pix.width, pix.height

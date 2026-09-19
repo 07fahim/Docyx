@@ -20,16 +20,10 @@ Detector = Callable[[bytes], List[VisualDetection]]
 
 
 class VisualAnalyzer:
-    """Finds non-text page furniture — rules and figure blocks — from the
-    rendered page image.
+    """Finds rules and figure blocks in the rendered page image.
 
-    Operates purely on pixels, so it runs on gate-failed pages too; that output
-    is what populates ``diagnostic_elements``.
-
-    ponytail: contour heuristics, not a model. Rules are reliable; figure
-    detection will merge dense text into blocks on some layouts. The knobs below
-    are the tuning surface — swap in a DocLayNet figure head via `detector` when
-    precision matters.
+    Pixels only, so it runs on gate-failed pages too. Contour heuristics, not
+    a model: rules are reliable, figure detection is approximate.
     """
 
     ENGINE = "visual-opencv-v1"
@@ -45,25 +39,17 @@ class VisualAnalyzer:
     ):
         self._detector = detector
         self.min_rule_ratio = min_rule_ratio
-        # A rule is long AND thin. Without the thinness bound a solid filled
-        # block survives the directional opening and masquerades as a rule.
-        # 12px at 150 DPI is roughly a 6pt stroke.
+        # A rule is long AND thin: without the thinness bound a filled block
+        # survives the opening and masquerades as one.
         self.max_rule_thickness = max_rule_thickness
         self.min_figure_area_ratio = min_figure_area_ratio
-        # Connected components per 10k px, measured before the closing that
-        # merges a region. Text shatters into one component per glyph; figures
-        # do not. Measured on real documents: text-only pages bottom out around
-        # 27-39, while genuine figures sit near 10. 20 splits them.
+        # Components per 10k px. Text shatters into one per glyph (27-39 on
+        # real pages); figures sit near 10.
         self.max_component_density = max_component_density
         self.confidence = confidence
 
     def _engine(self) -> str:
-        """Provenance must name whichever engine actually produced the result.
-
-        A detector may declare its own `engine`; otherwise this is the built-in
-        heuristic. Reporting the heuristic's name for a model's output would
-        make provenance a lie and break the swappability claim (§26.11).
-        """
+        """The detector's own engine name, or the built-in heuristic's."""
         return getattr(self._detector, "engine", None) or self.ENGINE
 
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
@@ -141,9 +127,8 @@ class VisualAnalyzer:
             # A block that is really just a thick rule is already reported as one.
             if any(_iou(box, rb) > 0.5 for rb in rule_boxes):
                 continue
-            # Closing merges a paragraph into one blob that looks exactly like a
-            # figure by shape alone. Ask the *unclosed* ink how fragmented it is:
-            # text is one component per glyph, a figure is not.
+            # Closing merges a paragraph into a figure-shaped blob; ask the
+            # unclosed ink how fragmented it is.
             if _component_density(ink[y : y + ch, x : x + cw]) > self.max_component_density:
                 continue
             out.append(VisualDetection(bbox=box, kind="figure", score=self.confidence))

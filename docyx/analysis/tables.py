@@ -16,8 +16,7 @@ class CellDetection:
     row_span: int = 1
     column_span: int = 1
     score: float = 1.0
-    #: Header rather than body (§11, "where detectable"). Defaults False so a
-    #: detector that cannot tell says nothing rather than guessing "body".
+    #: False also means "the detector could not tell".
     is_header: bool = False
 
 
@@ -45,9 +44,8 @@ Detector = Callable[[bytes], List[TableDetection]]
 class TableAnalyzer:
     """Detects table regions and their cell grid from a rendered page image.
 
-    The detector callable performs the actual table inference. When no detector
-    is supplied, a deterministic heuristic stub is used (no detections) so the
-    pipeline is testable without model weights.
+    Without a detector this yields nothing, so the pipeline stays testable
+    without model weights.
     """
 
     ENGINE = "table-heuristic-v1"
@@ -56,12 +54,7 @@ class TableAnalyzer:
         self._detector = detector
 
     def _engine(self) -> str:
-        """Provenance must name whichever engine actually produced the result.
-
-        A detector may declare its own `engine`; otherwise this is the built-in
-        heuristic. Reporting the heuristic's name for a model's output would
-        make provenance a lie and break the swappability claim (§26.11).
-        """
+        """The detector's own engine name, or the built-in heuristic's."""
         return getattr(self._detector, "engine", None) or self.ENGINE
 
     def analyze(self, image_bytes: bytes, page_num: int = 0) -> List[Element]:
