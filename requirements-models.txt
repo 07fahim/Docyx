@@ -16,4 +16,5 @@ pillow>=10.0       # image handling for the processors
 
 # Optional layout model, same stack as the table detector above.
 # Adds no new dependency, only ~160 MB of weights on first use.
-# Aryn/deformable-detr-DocLayNet — Apache-2.0 weights, DocLayNet (CDLA-Permissive-1.0).
+# Aryn/deformable-detr-DocLayNet — Apache-2.0 weights (verified on the model
+# card). The card states NO dataset licence; see LICENSING.md.

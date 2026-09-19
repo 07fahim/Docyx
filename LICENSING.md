@@ -15,6 +15,21 @@ choice, so it can be revisited deliberately rather than rediscovered.
 | opencv-python-headless | >=4.8 | Apache-2.0 | Visual element detection | |
 | numpy | >=1.24 | BSD-3-Clause | Array handling for OpenCV | |
 
+### Optional OCR stack (`requirements-ocr.txt`)
+
+| Dependency | Licence | Role | Verified |
+|---|---|---|---|
+| pytesseract | Apache-2.0 | Thin wrapper over the binary | from project README, not re-checked |
+| pillow | MIT-CMU | Image handling | as above |
+| **tesseract binary** | Apache-2.0 | The recogniser itself | as above |
+| `tessdata_best` language files | Apache-2.0 | One per script | as above |
+
+The binary and its language data are **not** installed by pip and are not
+vendored here, so the obligation sits with the deployer. None of these is
+copyleft, so none affects the delivery model — but the "Verified" column is
+honest: these come from the projects' stated licences and should be confirmed
+against the installed versions before commercial reliance.
+
 ### Optional model stack (`requirements-models.txt`)
 
 | Dependency | Licence | Role |
@@ -39,14 +54,22 @@ open-source weights or commercial-use rights.
 They are **not** vendored, so this is a licence obligation on the *deployer*,
 not on this repository:
 
-| Weights | Licence | Downloaded by |
-|---|---|---|
-| `microsoft/table-transformer-detection` | MIT | `TableTransformerDetector` on first `detect()` |
-| `microsoft/table-transformer-structure-recognition` | MIT | same |
+| Weights | Licence | Verified | Downloaded by |
+|---|---|---|---|
+| `microsoft/table-transformer-detection` | MIT | yes | `TableTransformerDetector`, first call |
+| `microsoft/table-transformer-structure-recognition` | MIT | yes | same |
+| `Aryn/deformable-detr-DocLayNet` | Apache-2.0 | yes, model card | `DocLayNetDetector`, first call |
 
-MIT permits commercial use and imposes only attribution, so neither constrains
-the delivery model. Nothing else is wired up; **re-run this audit whenever a
-detector is added**, because a permissively licensed *library* routinely ships
+MIT and Apache-2.0 both permit commercial use and impose only attribution, so
+none constrains the delivery model.
+
+**The DocLayNet model card states no dataset licence.** The upstream IBM
+release of DocLayNet is CDLA-Permissive-1.0, but that is not asserted on the
+weights themselves, and a weights licence does not inherit its dataset's
+terms. Treat the training-data position as unconfirmed until someone checks
+the upstream release directly.
+
+**Re-run this audit whenever a detector is added**, because a permissively licensed *library* routinely ships
 non-commercial weights (several layout models are CC-BY-NC), and that asymmetry
 is what §27 warns about.
 
