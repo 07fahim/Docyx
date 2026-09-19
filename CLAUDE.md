@@ -62,6 +62,21 @@ Table structure lives in `Element.children`: a `table` holds `table_cell` childr
 
 Extraction is at **line** granularity (§5), not span. `NativeTextExtractor` joins a line's spans back together — PyMuPDF emits inter-word gaps as their own spans, so plain concatenation reproduces the line exactly, which is why blank spans must **not** be skipped. Per-span extraction split lines at every inline citation and superscript, and those fragments then scattered during ordering. Typography is taken from the longest span so a leading superscript can't misreport the line. **A line that mixes styles also keeps its runs in `children` as `text_span` elements** — the dominant span is an honest summary of a uniform line and a lossy one otherwise, since `Note: and the rest of the sentence` reports `bold: false` and the bold vanishes. Measured: 3.6% of corpus lines mix bold with non-bold, 9.0% mix any two styles. Uniform lines get no children, because restating a line's own typography beneath it would roughly double the output to say nothing. Spans are not orderable and live in `children`, so a line and its own fragments never occupy separate reading positions. Verified across 469k characters of real PDFs: the character multiset matches PyMuPDF's own extraction exactly.
 
+### Alignment, indent, line height (§7)
+
+`Element.layout` (`TextLayout`), a separate object from `Typography` on purpose: typography is *carried verbatim from the PDF*, these are *measured from geometry*, and mixing read values with computed ones inside an object whose claim is "what the file said" would quietly break the provenance story.
+
+- **`indent` and `line_height`** are plain measurements against the PyMuPDF block and are always present. `indent` is from the *leading* edge, so an RTL paragraph measures from the right — reporting its left gap would invert the meaning.
+- **`alignment` needs a real paragraph box, and a PyMuPDF block is not one.** Two attempts to derive it from blocks were both confidently wrong on `arxiv_attention` p2: one block holds `3.1` and `Encoder and Decoder Stacks` together, so the heading measured `right`; against modal edges instead, a short last line measured `justify`. It is therefore computed in the pipeline against **layout regions**, and is `None` without a layout model. An absent value beats a wrong one here.
+
+Three rules the measurements forced, each pinned by a test:
+
+| rule | why |
+|---|---|
+| 3+ lines before reporting anything | two lines can show any two arbitrary edges |
+| modal edges, ties toward the widest | tie-breaking toward the *short* line made a justified paragraph's last line report `justify` — the one line that never is |
+| `justify` needs 2+ lines flush both sides | otherwise the widest line of a *centred* block claims `justify` on its own |
+
 ### Reading order
 
 Only `text` elements are numbered (`ORDERABLE_TYPES` in [reading_order.py](docyx/analysis/reading_order.py)). Containers — `layout_region`, `table` — and cells get `reading_order: None`, because numbering a table alongside the text inside it interleaves a box with its own contents. All elements are still returned geometrically sorted.

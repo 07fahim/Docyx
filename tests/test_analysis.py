@@ -416,3 +416,70 @@ def test_a_retyped_line_still_gets_a_reading_position():
     ordered = ReadingOrderCalculator.calculate([line])
 
     assert ordered[0].reading_order == 1
+
+
+# --- alignment, indentation, line height (§7) ------------------------------
+
+
+def _text_line(x, y, width, text="line"):
+    return Element(
+        id=f"t{x}_{y}", type="text",
+        geometry=Geometry(bbox=BoundingBox(x=x, y=y, width=width, height=10)),
+        confidence=Confidence(value=1.0, type=ConfidenceType.EXACT),
+        provenance=Provenance(source=ProvenanceSource.NATIVE_PDF),
+        text=text,
+    )
+
+
+def _text_region(x, y, w, h):
+    return Element(
+        id="region", type="text_region",
+        geometry=Geometry(bbox=BoundingBox(x=x, y=y, width=w, height=h)),
+        confidence=Confidence(value=0.9, type=ConfidenceType.DETECTED),
+        provenance=Provenance(source=ProvenanceSource.LAYOUT_MODEL),
+    )
+
+
+def test_a_justified_paragraphs_last_line_is_not_justified():
+    """The one line of a justified paragraph that is NOT justified is its last.
+    Tie-breaking the modal right edge toward the SHORT line inverted this: the
+    mode settled on the last line's own edge and it measured flush against
+    itself, reporting `justify` for the single line that never is."""
+    from docyx.pipeline.extractor import _assign_alignment
+
+    lines = [_text_line(0, 0, 300), _text_line(0, 20, 300), _text_line(0, 40, 80)]
+    _assign_alignment(lines, [_text_region(0, 0, 300, 60)])
+
+    assert [el.layout.alignment for el in lines] == ["justify", "justify", "left"]
+
+
+def test_centred_lines_are_recognised():
+    from docyx.pipeline.extractor import _assign_alignment
+
+    lines = [_text_line(100, 0, 100), _text_line(90, 20, 120), _text_line(105, 40, 90)]
+    _assign_alignment(lines, [_text_region(0, 0, 300, 60)])
+
+    assert all(el.layout.alignment == "center" for el in lines)
+
+
+def test_alignment_needs_a_block_with_a_shape():
+    """Two lines can show any two arbitrary edges. Measured: a PyMuPDF block
+    holding "3.1" and "Encoder and Decoder Stacks" reported the heading as
+    `right`, which is why this is computed against layout regions and needs
+    three lines before it says anything."""
+    from docyx.pipeline.extractor import _assign_alignment
+
+    lines = [_text_line(0, 0, 40), _text_line(60, 0, 240)]
+    _assign_alignment(lines, [_text_region(0, 0, 300, 20)])
+
+    assert all(el.layout is None or el.layout.alignment is None for el in lines)
+
+
+def test_without_a_layout_model_alignment_is_absent_not_guessed():
+    """An absent value beats a wrong one in a schema built on trusting values."""
+    from docyx.pipeline.extractor import _assign_alignment
+
+    lines = [_text_line(0, 0, 300), _text_line(0, 20, 300), _text_line(0, 40, 80)]
+    _assign_alignment(lines, [])
+
+    assert all(el.layout is None or el.layout.alignment is None for el in lines)

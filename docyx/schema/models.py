@@ -136,6 +136,37 @@ class Typography(BaseModel):
         return None if self.flags is None else bool(self.flags & 1)
 
 
+class TextLayout(BaseModel):
+    """Where a line sits inside its paragraph — §7's alignment, line height and
+    indentation.
+
+    A separate object from `Typography`, deliberately. Typography is documented
+    as "carried verbatim from the PDF text layer"; these three are **measured
+    from geometry**, and mixing read values with computed ones inside an object
+    whose whole claim is that it reports what the file said would quietly break
+    the provenance story this schema is built on.
+
+    All three are in 150-DPI reference pixels, like every other measurement.
+
+    `alignment` follows one explicit rule, applied per line against its own
+    block: flush on both edges is `justify`, flush left only is `left`, flush
+    right only is `right`, equal gaps on both sides is `center`, anything else
+    is None. A single-line block is None — one line cannot reveal the shape of
+    a paragraph, and guessing "left" for every heading and caption on the page
+    would be a confident lie.
+    """
+
+    #: Distance from the paragraph's leading edge. Measured from the RIGHT in
+    #: RTL blocks, so a positive indent always means "pushed in from where this
+    #: script starts", not "pushed in from the left of the page".
+    indent: Optional[float] = None
+    #: Top-to-top distance to the next line in the same block. None on the last
+    #: line, where there is nothing to measure against.
+    line_height: Optional[float] = None
+    #: "left" | "right" | "center" | "justify", or None when undecidable.
+    alignment: Optional[str] = None
+
+
 class GridPosition(BaseModel):
     """Where a cell sits in its table. Zero-indexed from the top-left."""
 
@@ -159,6 +190,8 @@ class Element(BaseModel):
     reading_order: Optional[int] = None
     typography: Optional[Typography] = None
     direction: Optional[Direction] = None
+    #: Where the line sits in its paragraph (§7), measured from geometry.
+    layout: Optional[TextLayout] = None
     #: Writing system, derived from the characters (§7). NOT language — see
     #: `script_of`. None when the text holds no letters at all.
     script: Optional[str] = None
