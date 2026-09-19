@@ -26,3 +26,7 @@ __pycache__/
 tmppip/
 tmphf/
 .omo/
+
+# Model and package caches, kept with the project but never committed.
+# HF_HOME and PIP_CACHE_DIR point here. ~1.2 GB.
+.caches/
