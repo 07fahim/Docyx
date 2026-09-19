@@ -75,6 +75,9 @@ corpus and three invisible until a second PDF producer existed. See `STATE.md`.
 
 ## Phase 5: Productization
 **Goal:** Build the visual workspace UI and prepare the system for distribution.
+**Status:** In progress. Criterion 5 (CLI) shipped in phase 4. The viewer's
+first slice — page, boxes, click for JSON — shipped 2026-09-20; editing and
+JSON-to-page selection remain.
 **Mode:** mvp
 **Success Criteria:**
 1. Two-panel workspace UI (Page Viewer + JSON Editor) is implemented with synchronized selection.

@@ -106,6 +106,32 @@ Adopting AGPL was chosen over swapping the library because:
    confined to `docyx/pdf/`; everything outside depends on the protocols in
    `docyx/pdf/protocols.py`. A backend swap is a change to one package.
 
+## Decision — settled 2026-09-20
+
+**Keep PyMuPDF. Ship AGPL-3.0. Open source. Buy nothing.**
+
+The owner's constraint is a strict zero spend, and there is no proprietary
+product to sell yet — so the question the commercial licence answers is not
+being asked. Explicitly ruled out for now:
+
+- an Artifex commercial licence
+- replacing PyMuPDF to escape AGPL
+- paid extraction or OCR APIs (Adobe, Azure, Google)
+- purchased model weights
+- a proprietary hosted architecture before the tool is validated
+
+**This is safe to defer, not merely deferred.** `test_pymupdf_stays_inside_docyx_pdf`
+fails the build if `fitz` is imported outside `docyx/pdf/`, so the cost of
+reversing stays one package however large the rest of the project grows. The
+last leak — the pipeline holding a raw `fitz.Document` — was closed the same
+day.
+
+**Revisit when, and only when, the delivery model actually changes**: a hosted
+service, a closed enterprise deployment, or distribution that cannot carry
+AGPL obligations. Review the exact deployment against the licence terms
+*before* committing to it — AGPL obligations attach to network-accessible
+software, not only to shipped binaries.
+
 ## What this decision forecloses
 
 AGPL's network clause means **anyone you offer this to over a network can

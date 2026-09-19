@@ -2,8 +2,10 @@
 
 ## Active Phase
 
-**Current Phase:** 4 — Evaluation and Hardening
-**Status:** Complete. Phase 5 (workspace UI) is next; its CLI deliverable shipped early.
+**Current Phase:** 5 — Productization (workspace UI)
+**Status:** In progress. Phases 1-4 complete. The CLI shipped in phase 4 and the
+viewer's first slice on 2026-09-20. Phase 6 (OCR) was pulled forward and is
+measured, not pending.
 
 Phases 1–3 are implemented and committed; this file was never updated as they
 landed and claimed "Current Phase: None" until 2026-09-14.
@@ -87,10 +89,24 @@ Built as the fourth `detector` seam (`docyx/analysis/ocr.py` + a Tesseract adapt
 not as a pipeline branch: no default recogniser, no new core dependency, and the
 default pipeline behaves exactly as before.
 
-**Untested below the seam.** No tesseract binary on the dev machine, so
-`TesseractDetector.__call__` has never executed. Eight tests cover the contract
-using a fake detector; none of them touch a recogniser. Quality is unknown, and
-Tesseract's Bengali accuracy in particular is the assumption most likely to fail.
+**Measured** (`scripts/measure_ocr.py`), against the native text of a page whose
+layer was destroyed by rendering it to pixels:
+
+| page | lang | native layer | sequence | char overlap |
+|---|---|---|---|---|
+| `arxiv_attention` p2 | eng | clean | 0.959 | 0.999 |
+| `wiki_bn` p5 | ben | clean | **0.987** | 0.986 |
+| `word_bn` p0 | ben | `COMBINING_MARK_ORDER` | 0.705 | 0.921 |
+| `wiki_ar` p6 | ara | `RTL_VISUAL_ORDER` | 0.140 | 0.928 |
+
+The two clean rows are the control and they are what make the other two
+readable: Tesseract scores 0.96-0.99 where the reference is trustworthy, so the
+low sequence scores are the *reference* being wrong, not the recogniser. The
+prediction that Bengali accuracy would reverse the engine choice was wrong.
+
+`--ocr-repair` acts on this: on a page warned `RTL_VISUAL_ORDER` or
+`COMBINING_MARK_ORDER`, OCR text becomes `elements` and the native text moves to
+`diagnostic_elements`. Still unmeasured: any real scan.
 
 ## First contact with real documents
 
@@ -110,12 +126,54 @@ Corrects two working assumptions: Word is not itself the defect (7 of 13 are
 Word-produced, 1 damaged), and scans turn up in ordinary document bundles even
 when nobody set out to collect them.
 
+## Phase 5 — Workspace (in progress)
+
+**First slice shipped** (`72eb41a`): `python -m docyx.workspace file.pdf` renders
+each page with its extracted elements drawn over it, coloured by
+`confidence.type`, click a box for its JSON, warnings as a banner.
+
+Built as a feedback loop, not a feature. The phase 1-4 code review found 12
+issues, **three of them regressions that 219 passing tests missed** — including
+`--layout` taking a page from 3 headings to zero — because no test rendered the
+output the way a user sees it.
+
+Missing: the return arrow (JSON to page) and editing. The schema is ready —
+`edit_text()`, `modified_by_user`, `original_text`, `source: manual`.
+
+## Decisions settled
+
+- **Licensing** (2026-09-20): keep PyMuPDF, ship AGPL-3.0, open source, buy
+  nothing. Safe to defer because containment is enforced by a test. See
+  LICENSING.md.
+- **Positioning**: the wedge is detecting PDFs whose text layer is damaged while
+  the page looks correct — not "more metadata than Adobe".
+
 ## Next Steps
 
-1. **More real documents, and Arabic ones.** The 13 above are a single source
-   in one country; the Arabic side has no real-world sample at all.
-2. Then, informed by (1): a layout model (fixes the two worst reading-order
-   scores and is the author's own field), or the phase-5 UI.
+1. **Workspace: the return arrow.** JSON to page highlighting, then text
+   editing through `edit_text()`.
+2. **Annotate reading order first** — it is the only thing with a scorer
+   (`measure_reading_order.py`). Decide what happens to truth-file checksums
+   before element boundaries become editable, or the 0.976 baseline is lost.
+3. **Build scorers** for semantic roles and table structure. Annotating them
+   without one produces data nothing measures against. This is real work, not
+   a side effect of (2).
+4. **Expand the corpus** from 8 labelled pages once annotation is cheap.
+5. **Source real scans**, hand-type truth, then measure OCR by CER. No real
+   scan has ever been through this pipeline; the one in `.corpus/real/`
+   arrived inside an ordinary circular bundle.
+
+## Known gaps, measured
+
+| gap | state |
+|---|---|
+| Layout model | weakest component. No `Title` on a paper's title page; region grouping scored *worse* (1.000 to 0.519) |
+| Reading order | 0.976 tau / 0.957 adj. Multi-line table cells at 0.808 are a semantic ambiguity geometry cannot resolve |
+| OCR | measured on flattened born-digital pages only |
+| Corpus | 8 labelled pages, 5 documents, ~20 real files, 2 sources |
+| `reading_order` provenance | §10 asks for confidence and provenance; it is a bare int |
+| §10 step 1 | "use native PDF structure" never implemented |
+| `schema/v1.6.json` | `description` values edited in place under a published version |
 
 ## Project Reference
 
@@ -125,4 +183,4 @@ See: .planning/PROJECT.md
 with unified geometry, provenance, and confidence — enabling downstream consumers to
 understand not just what was extracted, but how and how reliably.
 
-*Last updated: 2026-09-14*
+*Last updated: 2026-09-20*
