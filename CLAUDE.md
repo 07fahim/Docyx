@@ -10,6 +10,7 @@ No build step, no packaging (`pyproject.toml` does not exist). Run everything th
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx file.pdf -o out.json   # CLI
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 .venv/Scripts/python.exe -m pytest -q            # full suite (153 tests, ~10s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.3.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
