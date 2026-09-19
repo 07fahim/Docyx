@@ -6,6 +6,7 @@
     python -m docyx *.pdf -o results/             # batch, one file each
     python -m docyx document.pdf --pages 0-4,9    # selected pages only
     python -m docyx scan.pdf --ocr ben            # recognise a scanned page
+    python -m docyx paper.pdf -f bundle -o out/   # directory tree, one file per page
 
 Exit codes matter more than the output format for anything scripted:
 
@@ -23,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from docyx.export.bundle import write_bundle
 from docyx.export.markdown import to_markdown
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import Document, PageStatus
@@ -87,7 +89,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="file to write, or a directory when several PDFs are given",
     )
     parser.add_argument(
-        "-f", "--format", choices=("json", "markdown"), default="json", help="default: json"
+        "-f",
+        "--format",
+        choices=("json", "markdown", "bundle"),
+        default="json",
+        help="bundle writes a directory tree; default: json",
     )
     parser.add_argument("--pages", help='zero-based, e.g. "0-4,9"')
     parser.add_argument(
@@ -170,13 +176,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             worst = max(worst, 2)
             continue
 
-        text = render(document, args.format)
-        if args.output is None:
-            print(text)
+        if args.format == "bundle":
+            # A tree cannot go to stdout, so a target is required rather than
+            # defaulted — writing a directory into the user's cwd unasked is
+            # not a reasonable default for a tool run in a loop.
+            if args.output is None:
+                parser.error("-f bundle writes a directory tree, so -o DIR is required")
+            target = args.output / pdf.stem if many else args.output
+            paths = write_bundle(document, str(pdf), target)
+            if not args.quiet:
+                print(f"{target}: {len(paths)} files", file=sys.stderr)
         else:
-            suffix = ".md" if args.format == "markdown" else ".json"
-            target = args.output / f"{pdf.stem}{suffix}" if many else args.output
-            target.write_text(text, encoding="utf-8")
+            text = render(document, args.format)
+            if args.output is None:
+                print(text)
+            else:
+                suffix = ".md" if args.format == "markdown" else ".json"
+                target = args.output / f"{pdf.stem}{suffix}" if many else args.output
+                target.write_text(text, encoding="utf-8")
 
         if not args.quiet:
             print(summarise(document), file=sys.stderr)
