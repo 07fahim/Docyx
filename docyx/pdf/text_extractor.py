@@ -101,6 +101,14 @@ def _style_runs(spans: List[Dict[str, Any]], line_id: str) -> List[Element]:
     runs: List[Element] = []
     for span in spans:
         text = span.get("text", "")
+        if not text:
+            continue
+        # A blank span is an inter-word gap, never a style change: append it to
+        # the run in progress so concatenating the children reproduces the
+        # line. Skipping them ran the words together.
+        if not text.strip() and runs:
+            runs[-1].text = (runs[-1].text or "") + text
+            continue
         if not text.strip():
             continue
         typography = _typography(span)

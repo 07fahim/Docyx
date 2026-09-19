@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import fitz
 
@@ -33,6 +34,9 @@ class PDFRenderer:
                 "could not be read"
             )
 
+        self._cached_page: Optional[int] = None
+        self._cached = None
+
     def page_count(self) -> int:
         """Declared here so callers need not reach through to the fitz document."""
         return len(self.doc)
@@ -63,7 +67,13 @@ class PDFRenderer:
         return pix.width, pix.height
 
     def _pixmap(self, page_num: int):
-        return self.doc[page_num].get_pixmap(matrix=fitz.Matrix(SCALE, SCALE))
+        # Cached: _process_page calls render_page() and page_size() for the
+        # same page, which otherwise rasterises it twice at 150 DPI, and
+        # rendering dominates the per-page cost.
+        if self._cached_page != page_num:
+            self._cached = self.doc[page_num].get_pixmap(matrix=fitz.Matrix(SCALE, SCALE))
+            self._cached_page = page_num
+        return self._cached
 
     def close(self) -> None:
         self.doc.close()

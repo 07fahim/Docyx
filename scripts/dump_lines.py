@@ -19,13 +19,13 @@ import hashlib
 import json
 import sys
 
-from docyx.analysis.reading_order import ORDERABLE_TYPES
+from docyx.analysis.reading_order import is_orderable
 from docyx.pipeline.extractor import DocyxPipeline
 
 
 def neutral_lines(page):
     """Text elements in naive (y, x) order — the labelling worksheet."""
-    text = [el for el in page.elements if el.type in ORDERABLE_TYPES]
+    text = [el for el in page.elements if is_orderable(el)]
     return sorted(text, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
 
 

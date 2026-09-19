@@ -26,7 +26,8 @@ TEXT_ROLES = frozenset(
     }
 )
 
-#: Deprecated alias. Use is_orderable().
+#: Type-only view of the same set. is_orderable() is the real test:
+#: this admits layout REGIONS, which share these type names.
 ORDERABLE_TYPES = TEXT_ROLES
 
 #: Vertical overlap above which two elements belong to the same visual line.

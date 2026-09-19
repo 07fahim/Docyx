@@ -23,6 +23,10 @@ LAYOUT_LABELS = frozenset(
     }
 )
 
+#: Types that render as an image. `picture` is DocLayNet's name, `figure` the
+#: visual heuristic's.
+FIGURE_TYPES = frozenset({"figure", "picture"})
+
 #: What an unlabelled or unrecognised detection becomes.
 UNTYPED = "layout_region"
 

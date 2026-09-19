@@ -28,7 +28,7 @@ for channel in (sys.stdout, sys.stderr):
 
 from docyx.analysis.detectors.doclaynet import DocLayNetDetector
 from docyx.analysis.layout import LayoutAnalyzer
-from docyx.analysis.reading_order import ORDERABLE_TYPES, ReadingOrderCalculator
+from docyx.analysis.reading_order import is_orderable, ReadingOrderCalculator
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pipeline.extractor import DocyxPipeline
 
@@ -39,7 +39,7 @@ TRUTH_DIR = Path(".corpus/truth")
 
 
 def naive(page):
-    text = [el for el in page.elements if el.type in ORDERABLE_TYPES]
+    text = [el for el in page.elements if is_orderable(el)]
     return sorted(text, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
 
 

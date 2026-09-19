@@ -55,7 +55,11 @@ class TextLayerGate:
                 ),
             )
 
-        # Order matters: GateResult carries one warning, most severe first.
+        # GateResult carries ONE warning and garbled text is the most
+        # severe, so the two order checks are guarded by `ratio <
+        # suspect_ratio` to let TEXT_LAYER_SUSPECT win. Dropping either
+        # guard would report a garbled Arabic page as RTL_VISUAL_ORDER,
+        # which --ocr-repair then treats as repairable.
         ratio = _suspect_ratio(text)
         if ratio < self.suspect_ratio and _combining_mark_order(text):
             return GateResult(

@@ -317,3 +317,67 @@ def test_single_leading_prose_is_not_merged_into_one_line():
 
     assert "arbitrary text that wraps" in md, "hyphen repair was bypassed by the merge"
     assert "arbi- trary" not in md
+
+
+# --- regressions the phase review caught -----------------------------------
+
+
+def _lr_region(kind, x=0, y=0, w=500, h=500):
+    return Element(
+        id=f"r_{kind}", type=kind,
+        geometry=Geometry(bbox=BoundingBox(x=x, y=y, width=w, height=h)),
+        confidence=Confidence(value=0.9, type=ConfidenceType.DETECTED),
+        provenance=Provenance(source=ProvenanceSource.LAYOUT_MODEL),
+    )
+
+
+def _lr_line(text, size=10.0, kind="text", y=0.0):
+    return Element(
+        id=f"l_{text[:4]}_{y}", type=kind,
+        geometry=Geometry(bbox=BoundingBox(x=0, y=y, width=200, height=10)),
+        confidence=Confidence(value=1.0, type=ConfidenceType.EXACT),
+        provenance=Provenance(source=ProvenanceSource.NATIVE_PDF),
+        text=text, typography=Typography(font_size=size), reading_order=int(y) + 1,
+    )
+
+
+def _lr_page(elements):
+    return Page(page_number=1, status=PageStatus.OK, width=600, height=800, elements=elements)
+
+
+def test_a_semantic_role_outranks_font_size():
+    """_assign_roles retypes headings, and the size histogram filtered on
+    type == "text" — so enabling the layout model took arxiv_bert p0 from 3
+    headings to 0. The layout model must improve the export, not break it."""
+    md = to_markdown(Document(document_id="d", pages=[_lr_page([
+        _lr_line("A Real Title", size=10.0, kind="title", y=0),
+        _lr_line("body text here", size=10.0, y=20),
+    ])]))
+
+    assert "# A Real Title" in md
+    assert "body text here" in md
+
+
+def test_a_layout_region_does_not_emit_a_table_or_figure():
+    """DocLayNet types a region "table"/"picture" too. Without a provenance
+    check the export emits a spurious empty-table comment per region."""
+    md = to_markdown(Document(document_id="d", pages=[_lr_page([
+        _lr_line("body", y=0), _lr_region("table"), _lr_region("picture"),
+    ])]))
+
+    assert "table detected" not in md
+    assert "![figure]" not in md
+
+
+def test_a_detected_picture_still_renders():
+    """The figure test was `{"figure", "image"}`; nothing emits "image" and
+    DocLayNet emits "picture", so every detected picture vanished."""
+    picture = Element(
+        id="p1", type="picture",
+        geometry=Geometry(bbox=BoundingBox(x=10, y=10, width=50, height=50)),
+        confidence=Confidence(value=0.8, type=ConfidenceType.DETECTED),
+        provenance=Provenance(source=ProvenanceSource.GEOMETRY_INFERENCE),
+    )
+    md = to_markdown(Document(document_id="d", pages=[_lr_page([_lr_line("body"), picture])]))
+
+    assert "![figure]" in md

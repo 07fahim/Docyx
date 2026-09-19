@@ -189,3 +189,19 @@ def test_direction_is_read_from_the_recognised_characters():
         Direction.LTR,
         Direction.UNKNOWN,
     ]
+
+
+def test_ocr_pages_get_the_same_enrichment_as_native_ones():
+    """Both OCR branches built their Page directly and called only the ordering
+    step, so --ocr --layout --tables produced regions that typed nothing, no
+    alignment, and table cells with null text — while the same flags on a
+    born-digital page populated all three."""
+    import inspect
+
+    from docyx.pipeline import extractor
+
+    source = inspect.getsource(extractor.DocyxPipeline._process_page)
+
+    # Every path that builds `elements` goes through the one helper.
+    assert "ReadingOrderCalculator.calculate" not in source
+    assert source.count("_assemble(") == 3

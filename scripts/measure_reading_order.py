@@ -28,7 +28,7 @@ import json
 import sys
 from pathlib import Path
 
-from docyx.analysis.reading_order import ORDERABLE_TYPES
+from docyx.analysis.reading_order import is_orderable
 from docyx.pipeline.extractor import DocyxPipeline
 
 TRUTH_DIR = Path(".corpus/truth")
@@ -37,7 +37,7 @@ CORPUS_DIR = Path(".corpus")
 
 def neutral_lines(page):
     """Text elements in naive (y, x) order — must match scripts/dump_lines.py."""
-    text = [el for el in page.elements if el.type in ORDERABLE_TYPES]
+    text = [el for el in page.elements if is_orderable(el)]
     return sorted(text, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
 
 
@@ -119,7 +119,7 @@ def score_page(truth: dict) -> dict:
     docyx_order = [
         neutral_of[el.id]
         for el in sorted(
-            (el for el in page.elements if el.type in ORDERABLE_TYPES),
+            (el for el in page.elements if is_orderable(el)),
             key=lambda el: el.reading_order,
         )
     ]

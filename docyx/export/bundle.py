@@ -16,11 +16,10 @@ from typing import List
 import cv2
 import numpy as np
 
+from docyx.analysis.layout import FIGURE_TYPES
+from docyx.core.metadata import ProvenanceSource
 from docyx.pdf.renderer import PDFRenderer
 from docyx.schema.models import Document, Element, Page
-
-#: `picture` is DocLayNet's name, `figure` the visual heuristic's.
-FIGURE_TYPES = frozenset({"figure", "picture"})
 
 
 def write_bundle(document: Document, pdf_path: str, target: Path) -> List[Path]:
@@ -62,7 +61,9 @@ def _write_index(document: Document, target: Path) -> Path:
 
 
 def _write_tables(page: Page, target: Path) -> List[Path]:
-    tables = [el for el in page.elements if el.type == "table"]
+    # Not layout regions, which DocLayNet also types "table" — those carry no
+    # cells and would be written as an empty file beside the real one.
+    tables = [el for el in page.elements if _is_table(el)]
     return [
         _dump(
             target / "tables" / f"page_{page.page_number:03d}_table_{idx + 1:02d}.json",
@@ -72,13 +73,22 @@ def _write_tables(page: Page, target: Path) -> List[Path]:
     ]
 
 
+def _is_table(el: Element) -> bool:
+    return el.type == "table" and el.provenance.source is not ProvenanceSource.LAYOUT_MODEL
+
+
 def _write_figures(document: Document, pdf_path: str, target: Path) -> List[Path]:
     """Crop each detected figure from its page, re-rendering to do so.
 
     A 150-DPI RGB page is ~6 MB, too much to hold through the pipeline.
     """
     wanted = {
-        page.page_number: [el for el in page.elements if el.type in FIGURE_TYPES]
+        page.page_number: [
+            el
+            for el in page.elements
+            if el.type in FIGURE_TYPES
+            and el.provenance.source is not ProvenanceSource.LAYOUT_MODEL
+        ]
         for page in document.pages
     }
     if not any(wanted.values()):

@@ -9,7 +9,9 @@ A real layout model's types should take precedence when one is injected.
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from docyx.analysis.reading_order import BAND_OVERLAP, _overlap
+from docyx.analysis.layout import FIGURE_TYPES
+from docyx.analysis.reading_order import BAND_OVERLAP, TEXT_ROLES, _overlap
+from docyx.core.metadata import ProvenanceSource
 from docyx.core.geometry import BoundingBox
 from docyx.schema.models import Document, Element, Page, PageStatus
 
@@ -17,13 +19,17 @@ from docyx.schema.models import Document, Element, Page, PageStatus
 HEADING_RATIO = 1.15
 MAX_HEADING_LEVEL = 6
 
+#: Roles a layout model assigns that are headings, and the level they render
+#: at. Consulted before font size, which is the fallback heuristic.
+ROLE_LEVELS = {"title": 1, "section_header": 2}
+
 
 def _body_size(elements: List[Element]) -> Optional[float]:
     """The most common font size, which is almost always body text."""
     sizes = [
         round(el.typography.font_size, 1)
         for el in elements
-        if el.type == "text" and el.typography and el.typography.font_size
+        if _is_line(el) and el.typography and el.typography.font_size
     ]
     if not sizes:
         return None
@@ -38,7 +44,7 @@ def _heading_levels(elements: List[Element], body: Optional[float]) -> Dict[floa
         {
             round(el.typography.font_size, 1)
             for el in elements
-            if el.type == "text"
+            if _is_line(el)
             and el.typography
             and el.typography.font_size
             and el.typography.font_size >= body * HEADING_RATIO
@@ -46,6 +52,11 @@ def _heading_levels(elements: List[Element], body: Optional[float]) -> Dict[floa
         reverse=True,
     )
     return {size: min(i + 1, MAX_HEADING_LEVEL) for i, size in enumerate(bigger)}
+
+
+def _is_line(el: Element) -> bool:
+    """A line of text, not a layout region that happens to share its type."""
+    return el.type in TEXT_ROLES and el.provenance.source is not ProvenanceSource.LAYOUT_MODEL
 
 
 def _is_bold(el: Element) -> bool:
@@ -116,6 +127,8 @@ TABULAR_PARTS = 3
 
 def _style_role(el: Element, levels: Dict[float, int]) -> Tuple[Optional[int], bool]:
     """Heading level and boldness, used to decide whether lines may merge."""
+    if el.type in ROLE_LEVELS:
+        return ROLE_LEVELS[el.type], _is_bold(el)
     size = (
         round(el.typography.font_size, 1)
         if el.typography and el.typography.font_size
@@ -193,8 +206,7 @@ def _page_markdown(page: Page) -> str:
         text = (el.text or "").strip()
         if not text:
             continue
-        size = round(el.typography.font_size, 1) if el.typography and el.typography.font_size else None
-        level = levels.get(size)
+        level = _style_role(el, levels)[0]
         if level:
             flush()
             left_edge = None
@@ -235,10 +247,14 @@ def _page_markdown(page: Page) -> str:
     # Tables and figures carry no reading order (they are containers, see
     # ReadingOrderCalculator), so they are appended after the text flow.
     for el in page.elements:
+        # Layout REGIONS share these type names but hold no cells, so they
+        # would emit an empty table and a duplicate figure link.
+        if el.provenance.source is ProvenanceSource.LAYOUT_MODEL:
+            continue
         if el.type == "table":
             lines.append(_table_markdown(el))
             lines.append("")
-        elif el.type in {"figure", "image"}:
+        elif el.type in FIGURE_TYPES:
             box = el.geometry.bbox
             lines.append(f"![figure](#page-{page.page_number}-at-{int(box.x)}-{int(box.y)})")
             lines.append("")

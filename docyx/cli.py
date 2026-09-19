@@ -10,8 +10,8 @@
 
 Exit codes matter more than the output format for anything scripted:
 
-    0  every page produced a valid result
-    1  at least one page was degraded (`partial`) or failed
+    0  every page produced a valid result, or only degraded ones
+    1  at least one page FAILED (or, with --strict, was degraded)
     2  the input could not be read at all
 
 A page that fails the text-layer gate is NOT an error — it is a documented
@@ -151,6 +151,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.output.exists():
             parser.error(f"{args.output} is a file; give a directory for several PDFs")
         args.output.mkdir(parents=True, exist_ok=True)
+    # One input written to an existing directory: caught here rather than as an
+    # IsADirectoryError traceback from write_text() outside the try block.
+    if not many and args.format != "bundle" and args.output and args.output.is_dir():
+        parser.error(f"{args.output} is a directory; give a file path, or use -f bundle")
 
     if args.ocr_repair and not args.ocr:
         parser.error("--ocr-repair needs --ocr LANG to say which language to recognise")

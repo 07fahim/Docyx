@@ -51,7 +51,7 @@ import sys
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from docyx.analysis.reading_order import ORDERABLE_TYPES
+from docyx.analysis.reading_order import is_orderable
 from docyx.pipeline.extractor import DocyxPipeline
 from scripts.measure_reading_order import TRUTH_DIR, CORPUS_DIR, load_truth, neutral_lines
 
@@ -106,7 +106,7 @@ def compare(truth: dict) -> dict | None:
     reference = stream(lines[i].text for i in truth["order"])
 
     docyx_order = sorted(
-        (el for el in page.elements if el.type in ORDERABLE_TYPES),
+        (el for el in page.elements if is_orderable(el)),
         key=lambda el: el.reading_order,
     )
     docyx_stream = stream(el.text for el in docyx_order)

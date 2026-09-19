@@ -158,7 +158,7 @@ class DocyxPipeline:
                             ),
                         )
                     ],
-                    elements=ReadingOrderCalculator.calculate(recognised + detected),
+                    elements=_assemble(recognised, detected),
                 )
 
             return Page(
@@ -219,15 +219,12 @@ class DocyxPipeline:
                             ),
                         )
                     ],
-                    elements=ReadingOrderCalculator.calculate(repaired + detected),
+                    elements=_assemble(repaired, detected),
                     # Nothing is discarded: the native text is still exact.
                     diagnostic_elements=native,
                 )
 
-        _assign_roles(native, detected)
-        _assign_alignment(native, detected)
-        elements = ReadingOrderCalculator.calculate(native + detected)
-        _populate_cell_text(elements)
+        elements = _assemble(native, detected)
         return Page(
             page_number=page_num + 1,
             # Text came through, but a detector dropped out — the page is usable
@@ -255,6 +252,21 @@ def _safely(
         return run(image_bytes, page_num=page_num), None
     except Exception as exc:  # a detector failure degrades the page, never the document
         return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))
+
+
+def _assemble(text: List[Element], detected: List[Element]) -> List[Element]:
+    """Enrich text with the detections, order it, and fill table cells.
+
+    One path for every source of text. The OCR branches used to call only the
+    ordering step, so `--ocr --layout --tables` produced regions that typed
+    nothing, no alignment, and table cells with null text — while the same
+    flags on a born-digital page populated all three.
+    """
+    _assign_roles(text, detected)
+    _assign_alignment(text, detected)
+    elements = ReadingOrderCalculator.calculate(text + detected)
+    _populate_cell_text(elements)
+    return elements
 
 
 def _assign_roles(text: List[Element], detected: List[Element]) -> None:
@@ -381,7 +393,9 @@ def _populate_cell_text(elements: List[Element]) -> None:
     if not cells:
         return
 
-    lines = [el for el in elements if el.type == "text" and el.text]
+    # TEXT_ROLES, not "text": _assign_roles may have retyped a line inside
+    # the table to list_item or caption, and those cells would come back null.
+    lines = [el for el in elements if el.type in TEXT_ROLES and el.text]
     for cell in cells:
         box = cell.geometry.bbox
         inside = [
