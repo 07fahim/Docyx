@@ -1,32 +1,16 @@
-"""Tesseract behind the `OCRAnalyzer` detector seam.
+"""Tesseract behind the OCRAnalyzer detector seam.
 
-Chosen over PaddleOCR/EasyOCR on *runtime* footprint, not download size: it is
-the only mainstream engine that loads no Python ML framework into the process.
-EasyOCR sits around 1.8 GB RSS after init and PaddleOCR around 950 MB, with
-8-20 s of cold start; Tesseract is tens of MB and starts immediately. That
-keeps §24's resource-lightness intact — the constraint that ruled out the
-model-benchmark work in phase 4.
+Chosen on runtime footprint: it loads no Python ML framework into the process
+(~1.8 GB RSS for EasyOCR, ~950 MB for PaddleOCR, against tens of MB here).
 
-Two corrections to the reasoning as first recorded, since it was wrong: PaddleOCR
-runs on PaddlePaddle, not torch, and the "~2 GB" figure was CUDA-bundled torch
-when both alternatives install fine from a CPU index. Download size was never the
-real difference.
-
-**The open question is accuracy on Bengali, where Tesseract is weakest and
-EasyOCR has explicit `bn` support.** If that is what decides it, footprint is
-the wrong axis and this adapter is the wrong choice — which is why the engine
-sits behind `OCRAnalyzer`'s detector seam and costs one file to replace.
-
-Install (the binary is NOT a pip package):
+The engine is not a pip package:
 
     Windows:  winget install UB-Mannheim.TesseractOCR
     Debian:   apt install tesseract-ocr tesseract-ocr-ben tesseract-ocr-ara
     macOS:    brew install tesseract tesseract-lang
-    then:     pip install -r requirements-ocr.txt
 
-Language data must match the document: `lang="ben"` for Bengali, `"ara"` for
-Arabic, `"ben+eng"` for a bilingual page. The default `"eng"` on a Bengali scan
-does not fail — it returns confident Latin gibberish, which is worse.
+`lang` must match the document: `--ocr eng` on a Bengali scan returns
+confident Latin gibberish rather than failing.
 """
 
 import io
@@ -38,11 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from docyx.analysis.ocr import OCRLine
 from docyx.core.geometry import BoundingBox
 
-# The Windows installer does not add itself to PATH, so `pip install` succeeds,
-# the binary is present, and pytesseract still raises TesseractNotFoundError.
-# Measured on the author's own machine — this is the default experience, not an
-# edge case, so probe the standard locations rather than making every user
-# discover the same thing.
+# The Windows installer does not add itself to PATH.
 _WINDOWS_DEFAULTS = (
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
     r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -70,16 +50,13 @@ def _require_deps():
 
 
 class TesseractDetector:
-    """An `OCRAnalyzer` detector: page image bytes in, OCRLines out.
+    """An OCRAnalyzer detector: page image bytes in, OCRLines out.
 
-    Words are grouped back into lines by Tesseract's own (block, paragraph,
-    line) numbering rather than by geometry. The engine already segmented the
-    page; re-deriving lines from word boxes would be a second, worse segmenter
-    disagreeing with the first — and it is the same line-granularity decision
-    the native extractor makes (§5).
+    Words are regrouped into lines by Tesseract's own (block, paragraph, line)
+    numbering rather than by geometry.
     """
 
-    #: Reported as provenance.engine, so output traces to the recogniser.
+    #: Reported as provenance.engine.
     engine = "tesseract"
 
     def __init__(self, lang: str = "eng", config: str = "", binary: Optional[str] = None):
@@ -119,8 +96,7 @@ class TesseractDetector:
         lines: "OrderedDict[Tuple[int, int, int], Dict]" = OrderedDict()
         for i, word in enumerate(data["text"]):
             confidence = float(data["conf"][i])
-            # -1 marks the structural rows (page, block, paragraph, line) that
-            # image_to_data interleaves with the words. They carry no text.
+            # -1 marks the structural rows image_to_data interleaves.
             if confidence < 0 or not word.strip():
                 continue
             key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
@@ -139,8 +115,7 @@ class TesseractDetector:
             OCRLine(
                 bbox=_bbox(entry["box"]),
                 text=" ".join(entry["words"]),
-                # Mean, not min: one hard glyph in a long line should not
-                # condemn the line, and the caller filters on this value.
+                # Mean, not min: one hard glyph must not condemn the line.
                 score=sum(entry["scores"]) / len(entry["scores"]),
             )
             for entry in lines.values()

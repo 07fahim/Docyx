@@ -67,11 +67,8 @@ def summarise(document: Document) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    # Windows consoles default to cp1252, which cannot encode most of what this
-    # tool extracts — Arabic, Bengali, CJK, and even the angle brackets in an
-    # arXiv paper all raise UnicodeEncodeError and kill the run. Encoding to
-    # UTF-8 always succeeds; a console that cannot draw a glyph shows a box,
-    # but the bytes written or piped are correct.
+    # Windows consoles default to cp1252, which cannot encode most of what
+    # this tool extracts and raises UnicodeEncodeError mid-run.
     for channel in (sys.stdout, sys.stderr):
         if hasattr(channel, "reconfigure"):
             channel.reconfigure(encoding="utf-8")
@@ -148,8 +145,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except ValueError:
         parser.error(f"could not parse --pages {args.pages!r}; expected e.g. 0-4,9")
 
-    # A directory is required for many inputs: writing them all to one file
-    # would silently keep only the last.
+    # Many inputs need a directory, or only the last survives.
     many = len(args.pdfs) > 1
     if many and args.output and not args.output.is_dir():
         if args.output.exists():
@@ -174,8 +170,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError as exc:
             parser.error(str(exc))
 
-    # Same lazy-import reason as OCR: the model stack is optional, and its
-    # absence must not stop the CLI running without these flags.
+    # Lazy: the model stack is optional.
     layout_analyzer = table_analyzer = None
     try:
         if args.layout:
@@ -212,9 +207,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
 
         if args.format == "bundle":
-            # A tree cannot go to stdout, so a target is required rather than
-            # defaulted — writing a directory into the user's cwd unasked is
-            # not a reasonable default for a tool run in a loop.
+            # A tree cannot go to stdout.
             if args.output is None:
                 parser.error("-f bundle writes a directory tree, so -o DIR is required")
             target = args.output / pdf.stem if many else args.output

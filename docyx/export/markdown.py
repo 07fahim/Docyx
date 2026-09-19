@@ -1,22 +1,11 @@
 """Reconstruct readable Markdown from a page representation.
 
-This is deliberately two things at once:
+Also an evaluation instrument: scrambled Markdown is the fastest signal that
+reading order is wrong.
 
-1. A feature. Plenty of consumers want prose, not a JSON element tree.
-2. An evaluation instrument. Reading order and layout classification are hard
-   to judge from metrics — DocLayNet mAP tells you about boxes, not about
-   whether the *document* came out right. Scrambled Markdown is instantly
-   visible to a human, which is the fastest signal available that reading
-   order is wrong.
-
-Headings are inferred from font size, because layout classification is
-currently a stub: the most common size on a page is body text, and anything
-meaningfully larger is a heading, ranked descending into levels. That is a
-heuristic and it is wrong on documents that signal hierarchy by weight or
-colour alone. When a real layout model (or the §10 struct tree) lands, its
-element types should take precedence and this should become the fallback.
+Headings are inferred from font size because layout classification is a stub.
+A real layout model's types should take precedence when one is injected.
 """
-
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
@@ -24,8 +13,7 @@ from docyx.analysis.reading_order import BAND_OVERLAP, _overlap
 from docyx.core.geometry import BoundingBox
 from docyx.schema.models import Document, Element, Page, PageStatus
 
-# A size must exceed body text by this factor before it counts as a heading.
-# Below it, size variation is usually captions and footnotes, not hierarchy.
+# Below this, size variation is captions and footnotes, not hierarchy.
 HEADING_RATIO = 1.15
 MAX_HEADING_LEVEL = 6
 
@@ -96,18 +84,10 @@ INDENT_TOLERANCE = 10.0
 
 
 def _join_lines(parts: List[str]) -> str:
-    """Join wrapped lines back into a paragraph, repairing line-break hyphens.
+    """Join wrapped lines, dropping the hyphen at a line break.
 
-    PDF stores what was drawn, so a word broken across lines arrives as
-    "arbi-" + "trary". Joining on a space yields "arbi- trary", which is a
-    corrupted token to anything downstream — a retrieval index, a tokenizer, a
-    training target.
-
-    ponytail: a trailing hyphen followed by a lowercase letter is treated as a
-    line break, so a genuine compound broken at the margin ("well-" / "known")
-    loses its hyphen. Telling those apart needs a dictionary; the trade is worth
-    it because line breaks vastly outnumber compounds at the margin. Upgrade
-    path is a lexicon check if a corpus proves otherwise.
+    Always drops it, so a genuine compound broken at the margin loses its
+    hyphen. Telling them apart needs a lexicon; line breaks are far commoner.
     """
     out = ""
     for part in parts:
@@ -121,32 +101,21 @@ def _join_lines(parts: List[str]) -> str:
 
 
 def _starts_paragraph(el: Element, left_edge: Optional[float]) -> bool:
-    """Is this line indented relative to the paragraph it would otherwise join?
+    """Whether the line is indented, marking a new paragraph.
 
-    A first-line indent is the only signal in the geometry that a new paragraph
-    began; without it every column collapses into one block of prose.
-
-    ponytail: left-edge indents only, so right-to-left pages (where the indent
-    is on the right) and paragraphs marked by vertical space alone are missed.
+    Left-edge only, so RTL pages and space-separated paragraphs are missed.
     """
     if left_edge is None:
         return False
     return el.geometry.bbox.x > left_edge + INDENT_TOLERANCE
 
 
-# A line assembled from this many separate elements is structured, not prose:
-# real prose arrives one element per line. Three is the smallest count that
-# cannot happen by accident from a run-in heading or a trailing citation.
+# Prose arrives one element per line; three or more means structure.
 TABULAR_PARTS = 3
 
 
 def _style_role(el: Element, levels: Dict[float, int]) -> Tuple[Optional[int], bool]:
-    """What this element would render as: heading level, and boldness.
-
-    Merging is restricted to neighbours sharing a role. Without that guard a
-    bold heading absorbs the run-in sentence that starts on its baseline —
-    "Input/Output Representations" + "To make BERT" became one heading.
-    """
+    """Heading level and boldness, used to decide whether lines may merge."""
     size = (
         round(el.typography.font_size, 1)
         if el.typography and el.typography.font_size
@@ -160,17 +129,9 @@ def _visual_lines(
 ) -> List[Tuple[Element, int]]:
     """Group elements sharing a baseline into one visual line.
 
-    Extraction emits a line per text run, so anything set with wide internal
-    gaps — a table row, a numbered heading — arrives as several elements on one
-    baseline. Treated separately they each become their own block, which turns
-    an 8-column table into 8 paragraphs per row and a heading into two headings.
-
-    Returns each line with the number of elements it was assembled from, so the
-    caller can tell a table row from a sentence.
-
-    Safe against merging across columns: XY-cut emits a whole column before the
-    next begins, so two elements adjacent in *reading order* and sharing a
-    baseline are in the same column by construction.
+    Extraction emits one element per text run, so a table row or a numbered
+    heading arrives as several. Returns each line with the number of elements
+    it was built from, so the caller can tell a table row from a sentence.
     """
     lines: List[Tuple[Element, int]] = []
     for el in ordered:
@@ -178,11 +139,8 @@ def _visual_lines(
             previous, parts = lines[-1]
             a, b = previous.geometry.bbox, el.geometry.bbox
             same_role = _style_role(previous, levels) == _style_role(el, levels)
-            # Reuses reading_order's band test rather than "overlaps at all".
-            # PyMuPDF line boxes span ascender to descender, so at single
-            # leading consecutive body lines overlap slightly — a bare > 0 test
-            # merged whole paragraphs into one "line", which both skipped the
-            # hyphen repair and pushed ordinary prose past TABULAR_PARTS.
+            # The band test, not "overlaps at all": PyMuPDF boxes span
+            # ascender to descender, so tightly-led lines overlap slightly.
             if same_role and _overlap(a.y, a.y1, b.y, b.y1) >= BAND_OVERLAP:
                 top, bottom = min(a.y, b.y), max(a.y1, b.y1)
                 left, right = min(a.x, b.x), max(a.x1, b.x1)

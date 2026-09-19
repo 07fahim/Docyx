@@ -1,21 +1,12 @@
-"""Write a document out as a directory tree rather than one JSON blob.
+"""Write a document as a directory tree rather than one JSON blob (§4).
 
-    research_paper/
-    ├── document.json                     metadata + a page index
-    ├── pages/page_001.json               one page, with all its elements
-    ├── tables/page_003_table_01.json     one table, cells and all
-    └── figures/page_004_figure_01.png    cropped from the rendered page
+    document.json                  metadata + a page index, no elements
+    pages/page_001.json            one page with all its elements
+    tables/page_003_table_01.json  one table, cells and all
+    figures/page_004_figure_01.png cropped from the rendered page
 
-`document.json` holds the document metadata and an INDEX of pages — number,
-status, element count, warning codes — not the pages themselves. The obvious
-alternative, writing the whole document there as well, means every element
-exists twice in the same directory and the two copies can disagree after an
-edit. The index is what a caller actually wants from a top-level file: which
-pages need attention, and where to look.
-
-Tables and figures are extracted copies, not the originals. A `table` element
-still appears in its page file; `tables/` exists so a consumer can pick up one
-table without parsing the page around it.
+The index deliberately excludes elements: writing them here too would put
+every element in the directory twice.
 """
 
 import json
@@ -28,8 +19,7 @@ import numpy as np
 from docyx.pdf.renderer import PDFRenderer
 from docyx.schema.models import Document, Element, Page
 
-#: Element types worth writing out as an image. `picture` is DocLayNet's name,
-#: `figure` the visual heuristic's — both mean the same thing to a consumer.
+#: `picture` is DocLayNet's name, `figure` the visual heuristic's.
 FIGURE_TYPES = frozenset({"figure", "picture"})
 
 
@@ -61,7 +51,6 @@ def _write_index(document: Document, target: Path) -> Path:
                 "source_type": page.source_type,
                 "file": f"pages/page_{page.page_number:03d}.json",
                 "elements": len(page.elements),
-                # Codes, never messages: a caller branches on a stable code.
                 "issues": sorted({i.code for i in page.warnings + page.errors}),
             }
             for page in document.pages
@@ -84,11 +73,9 @@ def _write_tables(page: Page, target: Path) -> List[Path]:
 
 
 def _write_figures(document: Document, pdf_path: str, target: Path) -> List[Path]:
-    """Crop each detected figure out of its rendered page.
+    """Crop each detected figure from its page, re-rendering to do so.
 
-    Rendering again rather than holding page images through the pipeline: a
-    150-DPI RGB page is ~6 MB, and keeping one per page for a 200-page report
-    to crop a handful of figures is the wrong trade.
+    A 150-DPI RGB page is ~6 MB, too much to hold through the pipeline.
     """
     wanted = {
         page.page_number: [el for el in page.elements if el.type in FIGURE_TYPES]
@@ -122,8 +109,7 @@ def _write_figures(document: Document, pdf_path: str, target: Path) -> List[Path
 
 
 def _crop(image, element: Element):
-    """Clamped to the page: a detector can return a box that runs off the edge,
-    and numpy slicing would silently return an empty array rather than fail."""
+    """Clamped to the page: numpy slicing an off-page box returns empty."""
     height, width = image.shape[:2]
     box = element.geometry.bbox
     x0, y0 = max(int(box.x), 0), max(int(box.y), 0)

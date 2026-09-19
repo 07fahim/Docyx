@@ -55,7 +55,7 @@
       "type": "string"
     },
     "CoordinateSystem": {
-      "description": "What every coordinate on this page means (\u00a74, \u00a716).\n\nEmitted rather than assumed. The invariant \u2014 top-left origin, reference\npixels at 150 DPI \u2014 is enforced at every boundary in code and stated in\nCLAUDE.md, but it was never in the output, so a consumer reading the JSON\nhad to already know it or guess from the numbers. For a format whose whole\nclaim is that it describes itself, leaving the unit implicit was the one\nplace it did not.\n\nConstant in v1. It is a field rather than a documented convention so that\nrendering at another DPI, or a backend with a bottom-left origin, is a\nvalue change instead of a silent reinterpretation of every box ever\nexported.",
+      "description": "The units every coordinate on the page is expressed in (\u00a74, \u00a716).",
       "properties": {
         "origin": {
           "default": "top_left",
@@ -77,7 +77,7 @@
       "type": "object"
     },
     "Direction": {
-      "description": "Writing direction of a text element (\u00a713).\n\nTracked per element, not per page: a page may mix directions, and forcing\none global direction on it loses that. Read from the line's direction vector\n(vertical vs horizontal) and the Unicode bidi category of the characters\nthemselves (LTR vs RTL), so it is derived, never guessed.\n\nNot from the span's ``bidi`` embedding level, which real Arabic PDFs report\nas 0 on every span \u2014 see ``_direction`` in docyx/pdf/text_extractor.py.\n\nPer-element *language* is deliberately absent: PDFs carry no such field, so\npopulating it would mean detection, which could not honestly be `exact`.",
+      "description": "Writing direction of a text element (\u00a713).",
       "enum": [
         "ltr",
         "rtl",
@@ -392,7 +392,7 @@
       "type": "object"
     },
     "Provenance": {
-      "description": "Where an element's content came from, and whether a human overrode it.\n\n``source`` is the ORIGINAL producer and does not change when a human edits\nthe value. \"Where did this come from\" is a fact about history, and losing\nit would make an edited element indistinguishable from one typed from\nscratch \u2014 which is the distinction an annotation workflow is built on:\n\n* ``modified_by_user`` \u2014 a machine produced this and a human corrected it.\n  ``source`` still names the machine; ``original_text`` keeps what it said.\n* ``source=manual`` \u2014 a human created this element from nothing, by drawing\n  a box on a page the machine could not read. Nothing produces it yet; it\n  arrives with the workspace UI (\u00a711).\n\nOnly ``original_text`` is preserved, because text is the only value \u00a711\nspecifies as editable-with-history. Bounding-box editing (\u00a710) sets\n``modified_by_user`` without keeping the original geometry; add\n``original_geometry`` when something actually needs to undo across a\nsession rather than within one.",
+      "description": "Where an element's content came from, and whether a human changed it.\n\n`source` is the ORIGINAL producer and never changes on edit:\n`modified_by_user` marks a machine value a human corrected, while\n`source=manual` is reserved for elements a human created from nothing.",
       "properties": {
         "source": {
           "$ref": "#/$defs/ProvenanceSource"
@@ -471,7 +471,7 @@
       "type": "string"
     },
     "TextLayout": {
-      "description": "Where a line sits inside its paragraph \u2014 \u00a77's alignment, line height and\nindentation.\n\nA separate object from `Typography`, deliberately. Typography is documented\nas \"carried verbatim from the PDF text layer\"; these three are **measured\nfrom geometry**, and mixing read values with computed ones inside an object\nwhose whole claim is that it reports what the file said would quietly break\nthe provenance story this schema is built on.\n\nAll three are in 150-DPI reference pixels, like every other measurement.\n\n`alignment` follows one explicit rule, applied per line against its own\nblock: flush on both edges is `justify`, flush left only is `left`, flush\nright only is `right`, equal gaps on both sides is `center`, anything else\nis None. A single-line block is None \u2014 one line cannot reveal the shape of\na paragraph, and guessing \"left\" for every heading and caption on the page\nwould be a confident lie.",
+      "description": "Where a line sits inside its paragraph (\u00a77), measured from geometry.\n\nSeparate from Typography, which reports what the file said rather than\nwhat was computed. All values are 150 DPI reference pixels.",
       "properties": {
         "indent": {
           "anyOf": [
@@ -514,7 +514,7 @@
       "type": "object"
     },
     "Typography": {
-      "description": "Span-level type information, carried verbatim from the PDF text layer.\n\n``font_size`` is in points (the unit the PDF authors in), not the 150 DPI\nreference pixels used for geometry.\n\n``flags`` is the PyMuPDF span bitfield:\nbit 0 superscript, 1 italic, 2 serif, 3 monospace, 4 bold.\n``color`` is packed sRGB (``0xRRGGBB``).",
+      "description": "Type information carried verbatim from the PDF text layer.\n\n`font_size` is in points, not the 150 DPI pixels used for geometry.\n`flags` is the PyMuPDF span bitfield; `color` is packed sRGB.",
       "properties": {
         "font_family": {
           "anyOf": [
@@ -569,7 +569,6 @@
       "type": "object"
     }
   },
-  "description": "One PDF in, one Document out.\n\n`filename` and `page_count` are flat rather than nested under a `document`\nobject as \u00a74's example shows: nesting would move `document_id` and\n`schema_version` and break every existing consumer, which \u00a719 reserves for\na major version. The information is the same.\n\n`page_count` is the document's OWN length, which `len(pages)` is not once\n`--pages` has selected a subset \u2014 so a caller can always tell a 3-page\ndocument from three pages of a 300-page one.",
   "properties": {
     "schema_version": {
       "default": "1.6",

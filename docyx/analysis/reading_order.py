@@ -1,11 +1,17 @@
-from typing import List, Sequence, Tuple
+"""Reading order by recursive XY-cut, with banding as the fallback.
+
+See CLAUDE.md "Reading order" for the rationale behind each threshold and the
+measurements that set them. Re-run scripts/measure_reading_order.py before
+changing any of them.
+"""
+
+from typing import List, Optional, Sequence, Tuple
 
 from docyx.core.metadata import ProvenanceSource
 from docyx.schema.models import Direction, Element
 
-# Roles a line of text can carry once a layout model has typed it (§8). A line
-# stays orderable whatever it is called — a title reads before the paragraph
-# under it, and renaming it must not drop it out of the sequence.
+#: Types that carry a reading position, including the semantic roles a layout
+#: model assigns to a line.
 TEXT_ROLES = frozenset(
     {
         "text",
@@ -20,97 +26,41 @@ TEXT_ROLES = frozenset(
     }
 )
 
-# Kept for callers that predate roles; `is_orderable` is the real test.
+#: Deprecated alias. Use is_orderable().
 ORDERABLE_TYPES = TEXT_ROLES
 
-
-def is_orderable(element: Element) -> bool:
-    """Does this element carry a reading position?
-
-    Containers are excluded — numbering a table alongside the text inside it
-    interleaves a box with its own contents.
-
-    Once a layout model can type a LINE as `caption`, the line and the region
-    around it share a type string, so the type alone stops distinguishing them.
-    Provenance does: a detected region comes from `layout_model`, a line comes
-    from the text layer, OCR, or a human. Tested on presence of text first, and
-    rejected — a box a user has just drawn has no text yet and must still take
-    its place in the order.
-    """
-    if element.provenance.source is ProvenanceSource.LAYOUT_MODEL:
-        return False
-    return element.type in TEXT_ROLES
-
-# Two pieces of the same visual line overlap vertically by far more than this.
-# Below it they are separate lines that merely sit close together.
+#: Vertical overlap above which two elements belong to the same visual line.
 BAND_OVERLAP = 0.5
 
-# Minimum blank width, in 150 DPI pixels, before a vertical gap counts as a
-# column gutter rather than word spacing. A two-column article gutter runs
-# 45-55px; an inter-word space at 10pt is about 6px.
+#: Blank width, in 150 DPI pixels, before a vertical gap counts as a gutter.
 MIN_GUTTER = 20.0
 
-# A horizontal cut must be a structural boundary — the space under a figure
-# caption, not the leading between two lines. A gap qualifies only if it is
-# this much larger than the block's typical gap.
+#: A row cut must exceed both this and ROW_GAP_FACTOR x the block's typical gap.
 MIN_ROW_GAP = 1.0
 ROW_GAP_FACTOR = 1.5
 
-# A gutter is a channel running *down* a block, so each column it produces must
-# occupy a real share of the block's height. Without this, any two short lines
-# at different heights with clear air between them look like two columns.
+#: Each column must span this fraction of the block's height. Do not lower it
+#: to capture floats: it costs the pages currently scoring 1.000.
 MIN_COLUMN_HEIGHT_RATIO = 0.5
 
-# A text column is also *wide*. Table columns are narrow, and cutting on them
-# reads a results table downwards instead of across — the classic XY-cut
-# failure. Requiring a real share of the block's width rejects those without
-# needing to recognise the table.
-# 0.25 rather than 0.30 so three-column layouts survive: three equal
-# columns plus gutters come to about 0.29 of the block each. Measured on
-# A text column fills most of its share of the block; a table column does not.
-# Measured min fill (column width / (block width / n_columns)):
-#   real two-column body        0.963      3-column synthetic   0.892
-#   4-column synthetic          0.774      narrow-table test    0.652
-#   real 8-column GPT-3 table   0.417
-# The two REAL cases sit either side with a wide margin. This replaced an
-# absolute share-of-block test, which demanded >= 0.25 per column and was
-# therefore unsatisfiable from four columns up.
+#: A column must satisfy one of these two width tests, not both. Fill
+#: generalises to any column count; share is more forgiving of wide gutters.
 MIN_COLUMN_FILL = 0.70
-
-# Retained as the alternative test, not replaced. See _are_columns: the two
-# rules catch different regimes and a column need only satisfy one.
 MIN_COLUMN_WIDTH_RATIO = 0.25
 
 MAX_DEPTH = 24
 
 
+def is_orderable(element: Element) -> bool:
+    """Whether the element takes a position in the reading sequence."""
+    # Provenance, not type: a layout region and a line can both be "caption".
+    if element.provenance.source is ProvenanceSource.LAYOUT_MODEL:
+        return False
+    return element.type in TEXT_ROLES
+
+
 class ReadingOrderCalculator:
-    """Orders the text layer of a page by recursive XY-cut.
-
-    The page is cut into blocks along blank horizontal or vertical channels,
-    recursively, and each block is read in turn. Columns are found by cutting
-    vertically; a full-width heading or figure caption blocks a vertical cut,
-    which forces a horizontal cut first and so keeps the heading ahead of the
-    columns beneath it. This is the layered strategy §10 asks for, in its
-    geometric form.
-
-    Cuts are computed over text elements only. Rules and figures routinely span
-    the full page width — a single horizontal rule would otherwise bridge the
-    gutter and defeat every column cut on the page.
-
-    Within a block that cannot be cut further, elements are grouped into bands
-    by vertical overlap and read left to right, so a bold run-in heading stays
-    ahead of the sentence it introduces even though its bbox sits a fraction of
-    a pixel higher.
-
-    Cuts are geometric, but column *order* is not: `direction` is read from the
-    PDF, so RTL blocks read right to left and vertically-set text is taken out
-    of the cut geometry entirely.
-
-    ponytail: wide-spaced tabular text can still cut into columns and read down
-    rather than across, which is the classic XY-cut failure — a real table model
-    taking precedence is the fix, not more tuning here.
-    """
+    """Orders a page's text by recursive XY-cut."""
 
     @staticmethod
     def calculate(
@@ -121,11 +71,8 @@ class ReadingOrderCalculator:
         orderable = [el for el in elements if is_orderable(el)]
         others = [el for el in elements if not is_orderable(el)]
 
-        # Vertically-set text is out of the horizontal flow. One such line — an
-        # arXiv stamp down a margin — has a bbox as tall as the whole text body,
-        # so leaving it in the cut geometry bridges the gutter and defeats every
-        # column cut on the page. Exactly the reason cuts already exclude rules.
-        # It is still text, so it keeps a reading position: after the flow.
+        # Vertically-set text is excluded from the cut geometry: its bbox spans
+        # the page and would bridge every gutter. It still gets a position.
         flow = [el for el in orderable if el.direction is not Direction.TTB]
         vertical = [el for el in orderable if el.direction is Direction.TTB]
 
@@ -135,14 +82,11 @@ class ReadingOrderCalculator:
         for element in others:
             element.reading_order = None
 
-        # Non-text elements carry no reading position; they follow in a stable
-        # geometric order so page output stays deterministic.
         return ordered + _geometric(others)
 
 
 def _geometric(elements: List[Element]) -> List[Element]:
-    """Top-to-bottom, left-to-right. Used wherever order is positional rather
-    than a reading sequence, so page output stays deterministic."""
+    """Top-to-bottom, left-to-right."""
     return sorted(elements, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
 
 
@@ -152,19 +96,15 @@ def _xy_cut(
     if len(elements) <= 1 or depth >= MAX_DEPTH:
         return _banded(elements)
 
-    # Columns first. A valid gutter means genuine columns, and a column runs
-    # top to bottom before the next one starts — cutting rows first here would
-    # produce left, right, left, right instead.
+    # Columns before rows: a column runs top to bottom before the next starts.
     columns = _split(elements, min_gutter, horizontal=True)
     if len(columns) > 1 and _are_columns(elements, columns):
-        # Right-to-left text puts the first column on the right.
         if _is_rtl(elements):
             columns.reverse()
-        return [el for col in columns for el in _xy_cut(col, min_gutter, min_row_gap, depth + 1)]
+        return [
+            el for col in columns for el in _xy_cut(col, min_gutter, min_row_gap, depth + 1)
+        ]
 
-    # Only the single widest boundary, not every gap. Cutting at all of them
-    # shatters a two-column body into strips that each still hold both columns,
-    # and no strip can then be cut into columns usefully.
     rows = _widest_row_cut(elements, min_row_gap)
     if rows:
         return [el for row in rows for el in _xy_cut(row, min_gutter, min_row_gap, depth + 1)]
@@ -173,25 +113,20 @@ def _xy_cut(
 
 
 def _is_rtl(elements: List[Element]) -> bool:
-    """Does this block read right to left?
-
-    Uses the direction extraction reports from the PDF (§13) rather than
-    guessing from geometry. Mixed-direction pages resolve per block, which is
-    the point of tracking direction per element instead of per page.
-    """
+    """Whether the block reads right to left, by majority of its elements."""
     rtl = sum(1 for el in elements if el.direction is Direction.RTL)
     return rtl * 2 > len(elements)
 
 
-def _widest_row_cut(elements: List[Element], min_row_gap: float):
-    """Split a block in two at its widest horizontal channel, if that channel
-    is a structural boundary rather than ordinary line leading.
+def _widest_row_cut(
+    elements: List[Element], min_row_gap: float
+) -> Optional[List[List[Element]]]:
+    """Split at the widest horizontal channel, if it is a structural boundary.
 
-    Returns None when the block has no such boundary, which is the normal case
-    inside a column of body text — banding orders those lines correctly.
+    Returns None inside ordinary body text, where banding orders the lines.
     """
     ordered = sorted(elements, key=lambda el: el.geometry.bbox.y)
-    gaps = []  # (gap width, index of the element that starts the lower half)
+    gaps: List[Tuple[float, int]] = []
     reach = ordered[0].geometry.bbox.y1
     for index, element in enumerate(ordered[1:], start=1):
         box = element.geometry.bbox
@@ -202,6 +137,8 @@ def _widest_row_cut(elements: List[Element], min_row_gap: float):
     if not gaps:
         return None
 
+    # Only the widest gap. Cutting at every gap shatters a two-column body into
+    # strips that each still contain both columns.
     widest, cut_at = max(gaps)
     typical = _median(sorted(width for width, _ in gaps))
     if widest < max(min_row_gap, typical * ROW_GAP_FACTOR):
@@ -217,12 +154,7 @@ def _median(values: List[float]) -> float:
 
 
 def _are_columns(block: List[Element], columns: List[List[Element]]) -> bool:
-    """Does every candidate column run down enough of the block to be one?
-
-    Two lines sitting apart horizontally at different heights leave a clear
-    vertical channel between them, but they are consecutive lines of one
-    column, not two columns. Real columns each span most of the block.
-    """
+    """Whether the candidate columns are real columns rather than stray gaps."""
     height = _extent(block, vertical=True)
     width = _extent(block, vertical=False)
     if height <= 0 or width <= 0:
@@ -230,21 +162,6 @@ def _are_columns(block: List[Element], columns: List[List[Element]]) -> bool:
     slot = width / len(columns)
 
     def wide_enough(col: List[Element]) -> bool:
-        """Two regimes, and a column need only satisfy one.
-
-        `share` — how much of the whole block the column spans. Meaningful
-        while there are few columns, but every column is inherently small once
-        there are many, so on its own it made four-column layouts impossible.
-
-        `fill` — how much of its own slot the column occupies. Generalises to
-        any column count, but punishes a wide gutter: a two-column page with
-        short lines and a large gutter scores 0.63, below a table's 0.65.
-
-        Neither alone separates real text columns from table columns; either
-        one holding is sufficient, and a table satisfies neither. Measured:
-        real 2-column body share 0.481 / fill 0.963; real 8-column GPT-3 table
-        share 0.052 / fill 0.417.
-        """
         span = _extent(col, vertical=False)
         return span / width >= MIN_COLUMN_WIDTH_RATIO or span / slot >= MIN_COLUMN_FILL
 
@@ -255,21 +172,15 @@ def _are_columns(block: List[Element], columns: List[List[Element]]) -> bool:
 
 
 def _extent(elements: List[Element], vertical: bool) -> float:
+    boxes = [el.geometry.bbox for el in elements]
     if vertical:
-        return max(el.geometry.bbox.y1 for el in elements) - min(
-            el.geometry.bbox.y for el in elements
-        )
-    return max(el.geometry.bbox.x1 for el in elements) - min(
-        el.geometry.bbox.x for el in elements
-    )
+        return max(b.y1 for b in boxes) - min(b.y for b in boxes)
+    return max(b.x1 for b in boxes) - min(b.x for b in boxes)
 
 
 def _split(elements: List[Element], min_gap: float, horizontal: bool) -> List[List[Element]]:
-    """Cut a set of elements at every blank channel of at least ``min_gap``.
+    """Cut at every blank channel of at least `min_gap`."""
 
-    Splitting at all qualifying gaps at once — rather than the widest, one at a
-    time — keeps recursion shallow on text-dense pages.
-    """
     def span(el: Element) -> Tuple[float, float]:
         box = el.geometry.bbox
         return (box.x, box.x1) if horizontal else (box.y, box.y1)
@@ -289,14 +200,7 @@ def _split(elements: List[Element], min_gap: float, horizontal: bool) -> List[Li
 
 
 def _banded(elements: Sequence[Element]) -> List[Element]:
-    """Read a block that resists cutting: line by line, in reading direction.
-
-    Column *order* already respected `direction`; banding did not, and sorted
-    every band left to right unconditionally. That reverses any RTL row holding
-    more than one element — measured on `.corpus/wiki_ar.pdf` p6, where a figure
-    caption sits beside the body text and the page scored 0.893 adjacency
-    against hand-labelled truth, *below* the naive baseline's 0.911.
-    """
+    """Read a block that resists cutting, line by line in reading direction."""
     bands: List[List[Element]] = []
     top = bottom = 0.0
 
@@ -309,6 +213,7 @@ def _banded(elements: Sequence[Element]) -> List[Element]:
             bands.append([element])
             top, bottom = box.y, box.y1
 
+    # reverse= matters: sorting RTL bands left to right reverses every row.
     rtl = _is_rtl(elements)
     return [
         el

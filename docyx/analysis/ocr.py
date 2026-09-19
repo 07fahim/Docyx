@@ -1,16 +1,8 @@
-"""Text recovered from pixels, for pages with no machine-readable text layer.
+"""OCR behind the fourth analyzer seam.
 
-The fourth analyzer, and deliberately the same shape as the other three: an
-optional `detector` does the work, the analyzer only turns detections into
-Elements and attaches honest provenance. With no detector injected it returns
-nothing, so the default pipeline behaves exactly as it did before OCR existed
-and core keeps its four dependencies.
-
-This is where the two reserved schema values finally activate (§16.1/§16.2):
-``provenance.source = ocr`` and ``confidence.type = inferred``. Nothing else in
-the codebase may emit them — native text stays ``exact``, detector geometry
-stays ``detected``. That three-way split is the whole point: a consumer can
-tell read text from recognised text without parsing engine names.
+The only producer of `provenance.source = ocr` and `confidence.type =
+inferred`. Nothing else may emit them: that split is what lets a consumer tell
+read text from recognised text without parsing engine names.
 """
 
 from dataclasses import dataclass
@@ -37,20 +29,16 @@ Detector = Callable[[bytes], List[OCRLine]]
 class OCRAnalyzer:
     """Recognises text from the rendered page image.
 
-    Runs only on gate-failed pages (see `DocyxPipeline._process_page`). A page
-    that already has a text layer must never be re-read from pixels: the native
-    layer is exact by construction and OCR is not, so preferring OCR anywhere
-    would be a straight downgrade.
+    Runs only on gate-failed pages, or on repairable ones when `ocr_repair` is
+    set: re-reading a page that has an exact text layer is a downgrade.
     """
 
     ENGINE = "ocr-stub"
 
     def __init__(self, detector: Optional[Detector] = None, min_confidence: float = 0.0):
         self._detector = detector
-        # Lines below this are dropped rather than returned with a low score.
-        # Tesseract emits confident nonsense from page noise — speckles become
-        # single-character "words" — and one such line in the middle of a
-        # column derails reading order for the lines around it.
+        # Page speckle recognised as a one-character word lands mid-column
+        # and derails the reading order around it.
         self.min_confidence = min_confidence
 
     def _engine(self) -> str:
@@ -75,9 +63,7 @@ class OCRAnalyzer:
                         raw_confidence=line.score,
                     ),
                     text=line.text,
-                    # No typography: a recogniser reports characters, not the
-                    # font that drew them. Leaving it None keeps the markdown
-                    # heading heuristic from inventing structure from nothing.
+                    # No typography: a recogniser reports characters only.
                     direction=Direction.of_text(line.text),
                     script=script_of(line.text),
                 )

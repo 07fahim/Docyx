@@ -1,18 +1,10 @@
-"""Table Transformer (TATR) behind the `TableAnalyzer` detector seam.
+"""Table Transformer behind the TableAnalyzer detector seam.
 
-Two models, as the plan's §11 distinction between detection and structure
-requires: one finds table regions, a second recovers rows, columns and headers
-inside each region. Both are Microsoft's, MIT-licensed, and run on CPU.
+Two MIT-licensed Microsoft models: one finds table regions, a second recovers
+rows, columns and headers. Structure recognition returns overlapping strips,
+not cells; the grid is their intersection.
 
-Structure recognition returns rows and columns as separate overlapping strips,
-not cells — the cell grid is their intersection, which is what this builds. Row
-strips tagged as a header contribute the header flag.
-
-Coordinates in and out are the canonical 150 DPI reference pixels (§16); the
-page image the detector receives is already rendered at that scale, so no
-conversion is needed.
-
-Optional dependency: `pip install -r requirements-models.txt`.
+Coordinates in and out are 150 DPI reference pixels (§16).
 """
 
 import io
@@ -24,8 +16,7 @@ from docyx.core.geometry import BoundingBox
 DETECTION_MODEL = "microsoft/table-transformer-detection"
 STRUCTURE_MODEL = "microsoft/table-transformer-structure-recognition"
 
-# TATR crops tables tightly; a small margin stops edge rows and columns being
-# clipped away before structure recognition sees them.
+# TATR crops tightly; a margin keeps edge rows and columns.
 CROP_PADDING = 12.0
 
 
@@ -42,10 +33,9 @@ def _require_deps():
 
 
 class TableTransformerDetector:
-    """A `TableAnalyzer` detector: page image bytes in, TableDetections out.
+    """A TableAnalyzer detector: page image bytes in, TableDetections out.
 
-    Models load lazily on first call, so constructing the detector is cheap and
-    a pipeline can be assembled before deciding to run it.
+    Weights load lazily, so constructing the detector is cheap.
     """
 
     #: Reported as provenance.engine, so output is traceable to this model
@@ -154,13 +144,8 @@ class TableTransformerDetector:
                         row=r_index,
                         column=c_index,
                         score=min(r_score, c_score),
-                        # §11 requires header/body classification "where
-                        # detectable". The model detects it — "table column
-                        # header" is its own class — and this was binding the
-                        # flag to `_` and dropping it, while the module
-                        # docstring claimed the opposite. A table whose header
-                        # row is indistinguishable from its data is the
-                        # difference between a grid and a usable record.
+                        # The model detects headers as their own class; this
+                        # was binding the flag to `_` and dropping it.
                         is_header=is_header,
                     )
                 )

@@ -25,24 +25,11 @@ class ProvenanceSource(str, Enum):
 
 
 class Provenance(BaseModel):
-    """Where an element's content came from, and whether a human overrode it.
+    """Where an element's content came from, and whether a human changed it.
 
-    ``source`` is the ORIGINAL producer and does not change when a human edits
-    the value. "Where did this come from" is a fact about history, and losing
-    it would make an edited element indistinguishable from one typed from
-    scratch — which is the distinction an annotation workflow is built on:
-
-    * ``modified_by_user`` — a machine produced this and a human corrected it.
-      ``source`` still names the machine; ``original_text`` keeps what it said.
-    * ``source=manual`` — a human created this element from nothing, by drawing
-      a box on a page the machine could not read. Nothing produces it yet; it
-      arrives with the workspace UI (§11).
-
-    Only ``original_text`` is preserved, because text is the only value §11
-    specifies as editable-with-history. Bounding-box editing (§10) sets
-    ``modified_by_user`` without keeping the original geometry; add
-    ``original_geometry`` when something actually needs to undo across a
-    session rather than within one.
+    `source` is the ORIGINAL producer and never changes on edit:
+    `modified_by_user` marks a machine value a human corrected, while
+    `source=manual` is reserved for elements a human created from nothing.
     """
 
     source: ProvenanceSource

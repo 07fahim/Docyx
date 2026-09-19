@@ -6,11 +6,8 @@ from pydantic import BaseModel
 from docyx.pdf.protocols import TextDocument
 from docyx.schema.errors import PageIssue
 
-# Codepoints that indicate the text layer decoded badly rather than the document
-# genuinely containing these characters:
-#   U+FFFD          the replacement char — a mapping failed outright
-#   U+E000..U+F8FF  the BMP private use area — where subsetted fonts with no
-#                   usable ToUnicode CMap dump their glyphs
+# U+FFFD (mapping failed) and the BMP private use area, where subsetted fonts
+# with no usable ToUnicode CMap dump their glyphs.
 REPLACEMENT_CHAR = "�"
 PRIVATE_USE_START = ""
 PRIVATE_USE_END = ""
@@ -38,19 +35,9 @@ class GateResult(BaseModel):
 class TextLayerGate:
     """Decides whether a page carries a usable machine-readable text layer.
 
-    Failing the gate marks the page as unusable for text output, but never
-    prevents rendering or visual detection from running (§18.1).
-
-    Presence is not quality (§18.3). A PDF exported by an older tool with
-    subsetted fonts and no ToUnicode mapping returns text that is technically
-    extractable but garbled — passing that through silently is worse than
-    failing, because the caller has no way to tell. Such a page still passes
-    (the text may be partly usable) but carries a TEXT_LAYER_SUSPECT warning,
-    which degrades it to `partial`.
-
-    ponytail: codepoint heuristics only, so this needs no new dependency.
-    Reading each font's ToUnicode CMap via pikepdf would be more direct;
-    `suspect_ratio` is the tuning knob until there is evidence it is needed.
+    Failing the gate marks the page unusable for text output but never stops
+    rendering or visual detection (§18.1). Presence is not quality (§18.3): a
+    page whose text is extractable but garbled passes with a warning.
     """
 
     def __init__(self, suspect_ratio: float = 0.10):
@@ -68,8 +55,7 @@ class TextLayerGate:
                 ),
             )
 
-        # Order matters: a garbled text layer is the more severe finding, and
-        # GateResult carries one warning. Both degrade the page to `partial`.
+        # Order matters: GateResult carries one warning, most severe first.
         ratio = _suspect_ratio(text)
         if ratio < self.suspect_ratio and _combining_mark_order(text):
             return GateResult(
@@ -121,25 +107,12 @@ _CLOSERS = {")": "(", "]": "[", "}": "{"}
 
 
 def _rtl_visual_order(text: str) -> bool:
-    """Is right-to-left text stored in visual order rather than logical order?
+    """Whether RTL text is stored in visual rather than logical order.
 
-    In logical order an opening delimiter always precedes its closer. A PDF
-    that bakes the bidi reordering into the glyph stream emits the pair
-    mirrored — ']5[' where the document reads '[5]' — which is unambiguous
-    evidence that the bidi-neutral runs on that line are in visual order.
-
-    Any line CONTAINING right-to-left characters is inspected, not only
-    majority-RTL ones. A bilingual line — 'Mixed English و عربي together' — is
-    majority Latin, so a majority test skipped it and let its Arabic run come
-    back reversed and unflagged. Bilingual lines are the common case in the
-    documents this exists for. Latin prose contains no RTL characters at all,
-    so unmatched punctuation in it ("see b) above") still cannot trigger this:
-    verified zero false positives across every non-RTL document in the corpus.
-
-    ponytail: mirrored delimiters only. A stray unmatched closer inside genuine
-    RTL prose would false-positive; detecting reversed digit runs directly
-    would need the bidi algorithm, which is the thing we are avoiding. Warning,
-    not an error, for exactly that reason.
+    In logical order an opening delimiter precedes its closer; a visual-order
+    stream emits them mirrored (']5[' for '[5]'). Any line CONTAINING RTL
+    characters is checked, not only majority-RTL ones, because a bilingual
+    line is the common case in these documents.
     """
     for line in text.splitlines():
         if not any(unicodedata.bidirectional(ch) in ("R", "AL") for ch in line):
@@ -157,43 +130,20 @@ def _rtl_visual_order(text: str) -> bool:
 
 
 def _combining_mark_order(text: str, ratio: float = 0.02) -> bool:
-    """Is the text in glyph order rather than logical order?
+    """Whether the text is in glyph order rather than logical order.
 
-    Indic scripts reorder on display: in বাংলা the vowel sign is typed after
-    its consonant and drawn before it. A producer that writes glyph order
-    therefore emits the mark first — and a dependent vowel sign can never
-    legitimately begin a word, which makes this cheap to spot.
+    Indic scripts draw a vowel sign before the consonant it follows, so a
+    producer writing glyph order emits the mark first, and a dependent vowel
+    sign can never legitimately begin a word. Decided by Unicode category, so
+    it is not specific to one script: verified on Bengali, Devanagari, Tamil
+    and Telugu.
 
-    Script coverage is decided by Unicode category, not by a script list, so it
-    is not Bengali-specific. Verified to fire on deliberately scrambled
-    Bengali, Devanagari, Tamil and Telugu.
+    Thai and Lao are out of scope BY DESIGN — Unicode stores their pre-base
+    vowels before the consonant, so a leading vowel there is correct, and
+    flagging it would fail every correct Thai page. See tests/test_gate.py.
 
-    **Thai and Lao are out of scope, and not by oversight.** Their pre-base
-    vowels (เ แ โ ใ ไ) are category Lo rather than Mn/Mc, so this test can
-    never see them — but they also need no detection: Unicode stores those
-    vowels *before* the consonant by design, so `เรียน` beginning with `เ` is
-    correct, not scrambled. An earlier version of this docstring listed Thai as
-    covered; treating a leading Thai vowel as an orphan would have flagged
-    every correct Thai page in existence.
-
-    Measured: Word-produced Bengali scores 8.3%, the same language from Chrome
-    scores 0%, and Arabic and Latin score 0%. So the defect is a property of
-    the producer, not the script.
-
-    Distinct from TEXT_LAYER_SUSPECT, which counts undecodable codepoints. Here
-    every character *decodes*, so no amount of replacement-character counting
-    would ever see it.
-
-    It does NOT follow that the text is merely rearranged. Measured on
-    `.corpus/word_bn.pdf` p0 against an independent reading of the same pixels:
-    the letters GHA, NGA, VOWEL SIGN O and NUKTA occur zero times in the text
-    layer and repeatedly in the rendered page. Word-initial marks are a
-    *symptom* of a broken font mapping, and this check detects the symptom, not
-    its extent. Treat the warning as "this text is unreliable", never as "this
-    text can be fixed by reordering it" — the characters are not all there.
-
-    ponytail: word-initial marks only. Marks misplaced *within* a cluster are
-    invisible to this, and detecting those needs real grapheme segmentation.
+    The warning understates the damage: characters may also be missing
+    outright, so the text is not recoverable by reordering.
     """
     words = text.split()
     if not words:
