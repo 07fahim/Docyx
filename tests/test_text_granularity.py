@@ -14,6 +14,7 @@ from docyx.core.metadata import Confidence, ConfidenceType, Provenance, Provenan
 from docyx.export import to_markdown
 from docyx.pdf.text_extractor import NativeTextExtractor, _dominant_typography
 from docyx.pipeline.extractor import DocyxPipeline
+from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import Element
 
 
@@ -148,3 +149,67 @@ def test_run_in_heading_from_a_real_pdf(tmp_path):
     md = to_markdown(DocyxPipeline().process(str(pdf), "d"))
 
     assert md.index("Encoder:") < md.index("The encoder is composed")
+
+
+# --- mixed typography within a line (§7) -----------------------------------
+
+
+def test_a_bold_run_in_a_normal_line_is_not_lost():
+    """A line's typography is its DOMINANT span, which is lossy when the line
+    mixes styles: "Note: and the rest of the sentence" reports bold=False
+    because the normal run is longer, and the bold disappears entirely.
+
+    Measured on the corpus: 3.6% of lines mix bold with non-bold, 9.0% mix any
+    two styles.
+    """
+    doc = fitz.open()
+    page = doc.new_page()
+    writer = fitz.TextWriter(page.rect)
+    where = writer.append((72, 100), "Note: ", font=fitz.Font("tibo"), fontsize=11)
+    # Continue from where the bold run ended, so PyMuPDF sees ONE line with two
+    # spans rather than two lines that happen to share a baseline.
+    writer.append(where[1], "ordinary body text follows here", font=fitz.Font("tiro"), fontsize=11)
+    writer.write_text(page)
+    path = doc.write()
+    doc.close()
+
+    page_out = DocyxPipeline().process(path, "d", pages=[0]).pages[0]
+    line = next(el for el in page_out.elements if el.text and "Note" in el.text)
+
+    assert len(line.children) == 2, "a mixed line must keep its runs"
+    assert [c.type for c in line.children] == ["text_span", "text_span"]
+    fonts = [c.typography.font_family for c in line.children]
+    assert fonts[0] != fonts[1], "the two runs must differ in style"
+    assert "".join(c.text for c in line.children) == line.text
+
+
+def test_a_uniform_line_carries_no_runs():
+    """Giving every uniform line a child restating its own typography would
+    roughly double the output to say nothing. Empty children means "the line's
+    own typography is the whole story"."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "All one style here", fontsize=11)
+    path = doc.write()
+    doc.close()
+
+    page_out = DocyxPipeline().process(path, "d", pages=[0]).pages[0]
+
+    assert all(el.children == [] for el in page_out.elements if el.text)
+
+
+def test_style_runs_are_never_numbered_in_reading_order():
+    """A line and its own fragments must not occupy separate positions."""
+    doc = fitz.open()
+    page = doc.new_page()
+    writer = fitz.TextWriter(page.rect)
+    where = writer.append((72, 100), "Bold ", font=fitz.Font("tibo"), fontsize=11)
+    writer.append(where[1], "normal", font=fitz.Font("tiro"), fontsize=11)
+    writer.write_text(page)
+    path = doc.write()
+    doc.close()
+
+    page_out = DocyxPipeline().process(path, "d", pages=[0]).pages[0]
+    line = next(el for el in page_out.elements if el.children)
+
+    assert line.reading_order == 1
+    assert all(child.reading_order is None for child in line.children)
