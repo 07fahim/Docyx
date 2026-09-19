@@ -114,3 +114,46 @@ def test_page_selection_limits_the_output(text_pdf, capsys):
     assert len(document["pages"]) == 1
     # page_number stays absolute so a selected page still says where it came from
     assert document["pages"][0]["page_number"] == 2
+
+
+# --- bundle export ---------------------------------------------------------
+
+
+def test_bundle_writes_a_tree_with_an_index(text_pdf, tmp_path):
+    out = tmp_path / "tree"
+    assert main([str(text_pdf), "-f", "bundle", "-o", str(out), "-q"]) == 0
+
+    index = json.loads((out / "document.json").read_text(encoding="utf-8"))
+    assert index["filename"] == "text.pdf"
+    assert index["page_count"] == 3
+    assert [p["file"] for p in index["pages"]] == [
+        "pages/page_001.json",
+        "pages/page_002.json",
+        "pages/page_003.json",
+    ]
+    assert all((out / p["file"]).exists() for p in index["pages"])
+
+
+def test_the_index_holds_no_elements():
+    """Writing the whole document there as well means every element exists
+    twice in one directory, and the copies can disagree after an edit. The
+    index answers "which pages need attention", which is what a top-level file
+    is actually for."""
+    from docyx.export.bundle import _write_index
+    from docyx.schema.models import Document, Page, PageStatus
+
+    doc = Document(document_id="d", pages=[Page(page_number=1, status=PageStatus.OK,
+                                                width=10, height=10)])
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        index = json.loads(_write_index(doc, Path(tmp)).read_text(encoding="utf-8"))
+
+    assert "elements" not in json.dumps(index["pages"][0]["issues"])
+    assert index["pages"][0]["elements"] == 0
+
+
+def test_bundle_requires_an_output_directory(text_pdf):
+    """A directory tree cannot go to stdout, and writing one into the user's
+    cwd unasked is not a reasonable default for a tool run in a loop."""
+    with pytest.raises(SystemExit):
+        main([str(text_pdf), "-f", "bundle", "-q"])

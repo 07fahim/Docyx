@@ -177,6 +177,22 @@ So this is a broken font mapping showing up *as* misordering, and word-initial m
 
 A page with a text layer that decodes badly — subsetted fonts, no usable ToUnicode — still *passes* (its text is returned) but carries a `TEXT_LAYER_SUSPECT` warning that degrades it to `partial`. The heuristic measures the share of `U+FFFD` and private-use-area characters; `suspect_ratio` is the knob. It is validated against unit cases and a faked reader only — PyMuPDF's writer sanitizes unmappable codepoints on insert, so a real garbled fixture cannot be synthesized in-process.
 
+### Bundle export
+
+`-f bundle -o DIR` writes a tree instead of one blob (§4's output shape):
+
+```
+out/
+├── document.json                   metadata + a page INDEX, no elements
+├── pages/page_001.json             one page with all its elements
+├── tables/page_003_table_01.json   one table, cells and all
+└── figures/page_004_figure_01.png  cropped from the rendered page
+```
+
+`document.json` holds an index — page number, status, element count, issue *codes* — and deliberately not the pages themselves. Writing the whole document there too would put every element in the directory twice, and the copies can disagree after an edit. Tables and figures are extracted copies; the originals stay in their page file.
+
+Figures are cropped by re-rendering the page rather than holding page images through the pipeline: a 150-DPI RGB page is ~6 MB, and keeping one per page for a 200-page report to crop a handful of figures is the wrong trade.
+
 ### Markdown export doubles as an evaluation instrument
 
 [docyx/export/markdown.py](docyx/export/markdown.py) reconstructs prose from the page representation. Scrambled output is the fastest available signal that reading order is wrong — `test_two_column_page_reads_down_each_column` was a strict xfail until XY-cut landed and now passes; keep it as the canary. Headings are inferred from font size because layout classification is still a stub; a real layout model's types should take precedence when one lands.
