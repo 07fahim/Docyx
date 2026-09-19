@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Docyx workspace</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1b1e24; --line: #2a2f38;
+    --ink: #e6e9ef; --dim: #8b93a1;
+    --exact: #4ade80; --detected: #60a5fa; --inferred: #fbbf24; --edited: #c084fc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+         height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header b { font-weight: 600; }
+  .grow { flex: 1; }
+  button { background: #262b33; color: var(--ink); border: 1px solid var(--line);
+           border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  button:hover:not(:disabled) { background: #2f3540; }
+  button:disabled { opacity: .35; cursor: default; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #canvasWrap { flex: 1; overflow: auto; padding: 20px; display: flex;
+                justify-content: center; align-items: flex-start; }
+  canvas { background: #fff; box-shadow: 0 2px 24px #0008; }
+  aside { width: 400px; border-left: 1px solid var(--line); background: var(--panel);
+          overflow: auto; padding: 14px 16px; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 12px; }
+  .muted { color: var(--dim); }
+  .legend { display: flex; gap: 14px; font-size: 12px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+              margin-right: 5px; vertical-align: middle; }
+  .issue { background: #3a2a1a; border: 1px solid #6b4a1f; color: #fcd9a0;
+           padding: 6px 9px; border-radius: 4px; margin-bottom: 8px; font-size: 12px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--dim); margin: 16px 0 6px; font-weight: 600; }
+</style>
+
+<header>
+  <b id="file">—</b>
+  <span class="muted" id="status"></span>
+  <span class="grow"></span>
+  <div class="legend">
+    <span><i style="background:var(--exact)"></i>exact</span>
+    <span><i style="background:var(--detected)"></i>detected</span>
+    <span><i style="background:var(--inferred)"></i>inferred</span>
+    <span><i style="background:var(--edited)"></i>edited</span>
+  </div>
+  <span class="grow"></span>
+  <button id="prev">&larr;</button>
+  <span id="pageno" class="muted">—</span>
+  <button id="next">&rarr;</button>
+</header>
+
+<main>
+  <div id="canvasWrap"><canvas id="c"></canvas></div>
+  <aside>
+    <div id="issues"></div>
+    <h2>Element</h2>
+    <pre id="detail" class="muted">Click a box on the page.</pre>
+  </aside>
+</main>
+
+<script>
+const COLOURS = { exact: "#4ade80", detected: "#60a5fa", inferred: "#fbbf24" };
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let state = { index: 0, elements: [], image: null, selected: null, scale: 1 };
+
+function flatten(elements) {
+  // Cells and style runs live in `children`; they are clickable too, but the
+  // parent is drawn first so a cell sits on top of its table.
+  const out = [];
+  for (const el of elements) { out.push(el); for (const c of el.children || []) out.push(c); }
+  return out;
+}
+
+function colour(el) {
+  if (el.provenance && el.provenance.modified_by_user) return "#c084fc";
+  return COLOURS[el.confidence && el.confidence.type] || "#8b93a1";
+}
+
+function draw() {
+  if (!state.image) return;
+  const maxW = document.getElementById("canvasWrap").clientWidth - 40;
+  state.scale = Math.min(1, maxW / state.image.width);
+  canvas.width = state.image.width * state.scale;
+  canvas.height = state.image.height * state.scale;
+  ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
+
+  for (const el of state.elements) {
+    const b = el.geometry.bbox, s = state.scale;
+    const isSel = state.selected === el;
+    ctx.lineWidth = isSel ? 2.5 : 1;
+    ctx.strokeStyle = isSel ? "#fff" : colour(el);
+    ctx.strokeRect(b.x * s, b.y * s, b.width * s, b.height * s);
+    if (isSel) {
+      ctx.fillStyle = "#ffffff22";
+      ctx.fillRect(b.x * s, b.y * s, b.width * s, b.height * s);
+    }
+  }
+}
+
+canvas.addEventListener("click", (ev) => {
+  const r = canvas.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / state.scale, y = (ev.clientY - r.top) / state.scale;
+  // Smallest hit wins, so a cell is selectable over the table containing it.
+  let best = null;
+  for (const el of state.elements) {
+    const b = el.geometry.bbox;
+    if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) {
+      if (!best || b.width * b.height < best.geometry.bbox.width * best.geometry.bbox.height) best = el;
+    }
+  }
+  state.selected = best;
+  document.getElementById("detail").textContent =
+    best ? JSON.stringify(best, null, 2) : "Click a box on the page.";
+  document.getElementById("detail").className = best ? "" : "muted";
+  draw();
+});
+
+async function load(index) {
+  const res = await fetch(`/api/page?page=${index}`);
+  const data = await res.json();
+  if (data.error) { document.getElementById("status").textContent = data.error; return; }
+
+  state.index = data.index;
+  state.selected = null;
+  state.elements = flatten(data.page.elements || []).concat(
+    flatten(data.page.diagnostic_elements || []));
+
+  document.getElementById("file").textContent = data.filename || "(stream)";
+  document.getElementById("pageno").textContent = `${data.index + 1} / ${data.page_count}`;
+  document.getElementById("prev").disabled = data.index === 0;
+  document.getElementById("next").disabled = data.index >= data.page_count - 1;
+
+  const p = data.page;
+  document.getElementById("status").textContent =
+    `${p.status} · ${p.source_type} · ${state.elements.length} elements`;
+
+  const issues = (p.errors || []).concat(p.warnings || []);
+  document.getElementById("issues").innerHTML = issues
+    .map(i => `<div class="issue"><b>${i.code}</b><br>${i.message}</div>`).join("");
+
+  document.getElementById("detail").textContent = "Click a box on the page.";
+  document.getElementById("detail").className = "muted";
+
+  const img = new Image();
+  img.onload = () => { state.image = img; draw(); };
+  img.src = `/api/image?page=${index}`;
+}
+
+document.getElementById("prev").onclick = () => load(state.index - 1);
+document.getElementById("next").onclick = () => load(state.index + 1);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft" && state.index > 0) load(state.index - 1);
+  if (e.key === "ArrowRight") load(state.index + 1);
+});
+window.addEventListener("resize", draw);
+load(0);
+</script>

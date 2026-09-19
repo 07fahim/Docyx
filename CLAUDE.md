@@ -340,6 +340,20 @@ existed.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is still unused, and has no planned producer.
 
+## Workspace (phase 5, first slice)
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx.workspace file.pdf [--layout] [--tables] [--ocr ben]
+```
+
+Renders each page with its extracted elements drawn over it; click a box to see its JSON. Boxes are coloured by `confidence.type` — green `exact`, blue `detected`, amber `inferred`, purple edited — so a page's trustworthiness is visible before reading anything.
+
+**This exists as a feedback loop, not a feature.** The last code review found 12 issues, three of which were regressions that 219 passing tests missed — including `--layout` taking a page from 3 headings to zero — because no test ever rendered the output the way a user sees it.
+
+`http.server` from the stdlib, deliberately: one image, one JSON blob and one HTML file do not justify a fifth core dependency. The routes are thin so FastAPI can replace it when uploads, auth or concurrency arrive.
+
+Editing is not wired up yet. The schema is ready for it — `edit_text()`, `modified_by_user`, `original_text`, `source: manual`.
+
 ## Planning docs
 
 `.planning/` (GSD workflow: `ROADMAP.md`, `STATE.md`, per-phase dirs) tracks the 6-phase roadmap; phases 1–4 are complete. Phase 5 is the workspace UI — but the CLI, listed under phase 5, shipped early because being fast and light buys nothing while the tool is import-only. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
