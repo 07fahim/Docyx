@@ -121,6 +121,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="drop recognised lines below this score (0-1, default 0.4)",
     )
     parser.add_argument(
+        "--tables",
+        action="store_true",
+        help="detect table structure with Table Transformer (needs the model stack)",
+    )
+    parser.add_argument(
+        "--layout",
+        action="store_true",
+        help=(
+            "detect layout regions with DocLayNet and give each line a semantic "
+            "type (caption, section_header, ...). Also enables alignment"
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="exit 1 if any page is degraded, not only if one fails",
@@ -161,7 +174,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ImportError as exc:
             parser.error(str(exc))
 
-    pipeline = DocyxPipeline(ocr_analyzer=ocr, ocr_repair=args.ocr_repair)
+    # Same lazy-import reason as OCR: the model stack is optional, and its
+    # absence must not stop the CLI running without these flags.
+    layout_analyzer = table_analyzer = None
+    try:
+        if args.layout:
+            from docyx.analysis.detectors.doclaynet import DocLayNetDetector
+            from docyx.analysis.layout import LayoutAnalyzer
+
+            layout_analyzer = LayoutAnalyzer(detector=DocLayNetDetector())
+        if args.tables:
+            from docyx.analysis.detectors.table_transformer import TableTransformerDetector
+            from docyx.analysis.tables import TableAnalyzer
+
+            table_analyzer = TableAnalyzer(detector=TableTransformerDetector())
+    except ImportError as exc:
+        parser.error(str(exc))
+
+    pipeline = DocyxPipeline(
+        layout_analyzer=layout_analyzer,
+        table_analyzer=table_analyzer,
+        ocr_analyzer=ocr,
+        ocr_repair=args.ocr_repair,
+    )
     worst = 0
 
     for pdf in args.pdfs:

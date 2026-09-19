@@ -157,3 +157,24 @@ def test_bundle_requires_an_output_directory(text_pdf):
     cwd unasked is not a reasonable default for a tool run in a loop."""
     with pytest.raises(SystemExit):
         main([str(text_pdf), "-f", "bundle", "-q"])
+
+
+def test_layout_and_table_flags_exist():
+    """These features shipped reachable only from the Python API: tables and
+    layout regions were implemented, tested, and impossible to run from the
+    command line, which is the only way the tool is actually used."""
+    import argparse
+    import contextlib
+    import io
+
+    help_text = io.StringIO()
+    with contextlib.redirect_stdout(help_text), pytest.raises(SystemExit):
+        main(["--help"])
+
+    assert "--tables" in help_text.getvalue()
+    assert "--layout" in help_text.getvalue()
+
+
+def test_the_model_flags_do_not_break_a_run_without_them(text_pdf, tmp_path):
+    """Default stays stub-detectors and four core dependencies."""
+    assert main([str(text_pdf), "-o", str(tmp_path / "a.json"), "-q"]) == 0
