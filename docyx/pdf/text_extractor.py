@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from docyx.core.constants import SCALE
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
-from docyx.schema.models import Direction, Element, Typography, script_of
+from docyx.schema.models import Direction, Element, TextLayout, Typography, script_of
 
 
 class NativeTextExtractor:
@@ -38,6 +38,7 @@ class NativeTextExtractor:
         for b_idx, block in enumerate(page.get_text("dict").get("blocks", [])):
             if block.get("type", -1) != 0:  # not a text block
                 continue
+            block_lines: List[Element] = []
             for l_idx, line in enumerate(block.get("lines", [])):
                 spans = line.get("spans", [])
                 # Whitespace-only spans carry the gaps between words — dropping
@@ -60,8 +61,63 @@ class NativeTextExtractor:
                     script=script_of(text),
                     children=_style_runs(spans, element_id),
                 )
-                elements.append(element)
+                block_lines.append(element)
+
+            # Layout is relative to the BLOCK, so it can only be measured once
+            # every line in the block exists.
+            # Fall back to the union of the lines: a fake block in a test, or
+            # a malformed one in the wild, may carry no bbox of its own.
+            if not block_lines:
+                continue
+            block_box = (
+                _bbox(block["bbox"])
+                if "bbox" in block
+                else _union_all([el.geometry.bbox for el in block_lines])
+            )
+            for line_element in block_lines:
+                line_element.layout = _layout(line_element, block_lines, block_box)
+            elements.extend(block_lines)
         return elements
+
+
+# A line counts as flush with its block's edge within this many 150-DPI pixels.
+# Justified text is not pixel-perfect and a glyph's advance width overshoots
+# slightly, so an exact comparison would report almost nothing as flush.
+FLUSH_TOLERANCE = 4.0
+
+
+def _layout(element: Element, siblings: List[Element], block_box: BoundingBox) -> TextLayout:
+    """Where this line sits inside its block (§7).
+
+    `indent` and `line_height` only. Both are plain measurements against the
+    block and are reported whenever they exist.
+
+    `alignment` is deliberately NOT computed here, and that cost two attempts
+    to establish. A PyMuPDF block is not a paragraph: on arxiv_attention p2 one
+    block holds "3.1" and "Encoder and Decoder Stacks" together, and another
+    holds a bold run-in label plus the sentence after it. Measured against the
+    block bbox, the heading came out `right`; measured against the block's
+    modal edges, a short last line came out `justify` and body text came out
+    `right`. Both rules were confidently wrong on a real page.
+
+    Alignment needs a real paragraph box, which only a layout model supplies —
+    so it is computed in the pipeline (`_assign_alignment`) where regions are
+    available, and left None otherwise. An absent value is worth more than a
+    wrong one in a schema whose whole claim is that values can be trusted.
+    """
+    box = element.geometry.bbox
+    rtl = element.direction is Direction.RTL
+
+    # The NEXT line in the block, by position rather than by list order.
+    below = [s for s in siblings if s.geometry.bbox.y > box.y + 1]
+    nearest = min(below, key=lambda s: s.geometry.bbox.y, default=None)
+
+    return TextLayout(
+        # From the leading edge: a right-to-left paragraph indents from the
+        # right, and reporting its left gap would invert the meaning.
+        indent=round((block_box.x1 - box.x1) if rtl else (box.x - block_box.x), 2),
+        line_height=round(nearest.geometry.bbox.y - box.y, 2) if nearest else None,
+    )
 
 
 def _style_runs(spans: List[Dict[str, Any]], line_id: str) -> List[Element]:
@@ -116,6 +172,13 @@ def _style_runs(spans: List[Dict[str, Any]], line_id: str) -> List[Element]:
             )
         )
     return runs
+
+
+def _union_all(boxes: List[BoundingBox]) -> BoundingBox:
+    box = boxes[0]
+    for other in boxes[1:]:
+        box = _union(box, other)
+    return box
 
 
 def _union(a: BoundingBox, b: BoundingBox) -> BoundingBox:

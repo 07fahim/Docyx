@@ -152,6 +152,17 @@
           ],
           "default": null
         },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextLayout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "script": {
           "anyOf": [
             {
@@ -458,6 +469,49 @@
       ],
       "title": "ProvenanceSource",
       "type": "string"
+    },
+    "TextLayout": {
+      "description": "Where a line sits inside its paragraph \u2014 \u00a77's alignment, line height and\nindentation.\n\nA separate object from `Typography`, deliberately. Typography is documented\nas \"carried verbatim from the PDF text layer\"; these three are **measured\nfrom geometry**, and mixing read values with computed ones inside an object\nwhose whole claim is that it reports what the file said would quietly break\nthe provenance story this schema is built on.\n\nAll three are in 150-DPI reference pixels, like every other measurement.\n\n`alignment` follows one explicit rule, applied per line against its own\nblock: flush on both edges is `justify`, flush left only is `left`, flush\nright only is `right`, equal gaps on both sides is `center`, anything else\nis None. A single-line block is None \u2014 one line cannot reveal the shape of\na paragraph, and guessing \"left\" for every heading and caption on the page\nwould be a confident lie.",
+      "properties": {
+        "indent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Indent"
+        },
+        "line_height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Height"
+        },
+        "alignment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alignment"
+        }
+      },
+      "title": "TextLayout",
+      "type": "object"
     },
     "Typography": {
       "description": "Span-level type information, carried verbatim from the PDF text layer.\n\n``font_size`` is in points (the unit the PDF authors in), not the 150 DPI\nreference pixels used for geometry.\n\n``flags`` is the PyMuPDF span bitfield:\nbit 0 superscript, 1 italic, 2 serif, 3 monospace, 4 bold.\n``color`` is packed sRGB (``0xRRGGBB``).",

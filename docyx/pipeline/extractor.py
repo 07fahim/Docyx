@@ -12,7 +12,7 @@ from docyx.pdf.renderer import PDFRenderer
 from docyx.pdf.text_extractor import NativeTextExtractor
 from docyx.pipeline.gate import TextLayerGate
 from docyx.schema.errors import PageIssue
-from docyx.schema.models import Document, Element, Page, PageStatus
+from docyx.schema.models import Document, Element, Page, PageStatus, TextLayout
 
 
 class DocyxPipeline:
@@ -255,6 +255,7 @@ class DocyxPipeline:
                 )
 
         _assign_roles(native, detected)
+        _assign_alignment(native, detected)
         elements = ReadingOrderCalculator.calculate(native + detected)
         _populate_cell_text(elements)
         return Page(
@@ -323,6 +324,110 @@ def _assign_roles(text: List[Element], detected: List[Element]) -> None:
             if region.geometry.bbox.contains(cx, cy):
                 line.type = region.type
                 break
+
+
+#: A line counts as flush with its region's edge within this many 150-DPI px.
+#: Justified text is not pixel-perfect and glyph advances overshoot slightly.
+FLUSH_TOLERANCE = 4.0
+
+#: Alignment needs a block with a shape. Two lines can show any two arbitrary
+#: edges; three is the smallest sample where a repeated edge means something.
+MIN_LINES_FOR_ALIGNMENT = 3
+
+
+def _assign_alignment(text: List[Element], detected: List[Element]) -> None:
+    """Measure each line's alignment against its layout region (§7).
+
+    Here rather than in the extractor because it needs a real paragraph box.
+    Two attempts using PyMuPDF's own blocks were both confidently wrong on a
+    real page — a block merges a section number with its title, and a bold
+    run-in label with the sentence after it — so a heading measured `right`
+    and a short last line measured `justify`. See `_layout` in text_extractor.
+
+    Lines in no region keep `alignment: None`. Without a layout model that is
+    every line, which is the correct answer rather than a missing feature: an
+    absent value beats a wrong one in a schema built on trusting values.
+    """
+    # EVERY layout region, not only the TEXT_ROLES ones. `_assign_roles`
+    # deliberately ignores `text_region` — a line inside one should stay
+    # `text`, not become `text_region` — but for alignment that region is
+    # precisely the paragraph box being measured against, and filtering it out
+    # left this finding nothing on a page full of them.
+    regions = [
+        el for el in detected if el.provenance.source is ProvenanceSource.LAYOUT_MODEL
+    ]
+    if not regions:
+        return
+
+    regions.sort(key=lambda el: el.geometry.bbox.width * el.geometry.bbox.height)
+    members: dict = {}
+    for line in text:
+        box = line.geometry.bbox
+        cx, cy = box.x + box.width / 2, box.y + box.height / 2
+        for region in regions:
+            if region.geometry.bbox.contains(cx, cy):
+                members.setdefault(id(region), []).append(line)
+                break
+
+    for lines in members.values():
+        if len(lines) < MIN_LINES_FOR_ALIGNMENT:
+            continue
+        # Modal edges, not the region's bbox: a first-line indent or a short
+        # last line must not redefine where the paragraph's edge is.
+        left = _modal_edge([el.geometry.bbox.x for el in lines], widest=min)
+        right = _modal_edge([el.geometry.bbox.x1 for el in lines], widest=max)
+        # Justification is a property of the BLOCK, not of one line. In a
+        # centred block the widest line is flush with both modal edges and
+        # would otherwise report `justify` on its own — so require that at
+        # least two lines reach both edges before believing it.
+        flush_both = sum(
+            1
+            for el in lines
+            if abs(el.geometry.bbox.x - left) <= FLUSH_TOLERANCE
+            and abs(el.geometry.bbox.x1 - right) <= FLUSH_TOLERANCE
+        )
+        for line in lines:
+            if line.layout is None:
+                line.layout = TextLayout()
+            line.layout.alignment = _alignment(
+                line.geometry.bbox, left, right, justified=flush_both >= 2
+            )
+
+
+def _modal_edge(values: List[float], widest) -> float:
+    """The edge most lines share, to the nearest pixel.
+
+    `widest` breaks ties toward the paragraph's true extent — `min` for the
+    left edge, `max` for the right. Getting this backwards on the right edge
+    made a paragraph's short LAST line report `justify`, because the mode
+    settled on that line's own short edge and it then measured flush against
+    itself. A justified paragraph's last line is the one line that is not
+    justified, so that answer was exactly inverted.
+    """
+    counts: dict = {}
+    for value in values:
+        key = round(value)
+        counts[key] = counts.get(key, 0) + 1
+    best = max(counts.values())
+    return float(widest(k for k, n in counts.items() if n == best))
+
+
+def _alignment(box, left: float, right: float, justified: bool) -> Optional[str]:
+    flush_left = abs(box.x - left) <= FLUSH_TOLERANCE
+    flush_right = abs(box.x1 - right) <= FLUSH_TOLERANCE
+    symmetric = abs((box.x - left) - (right - box.x1)) <= FLUSH_TOLERANCE
+
+    if flush_left and flush_right:
+        # Checked before `center` only when the block as a whole is justified;
+        # otherwise the widest line of a centred paragraph claims `justify`.
+        return "justify" if justified else "center"
+    if symmetric and not (flush_left or flush_right):
+        return "center"
+    if flush_left:
+        return "left"
+    if flush_right:
+        return "right"
+    return None
 
 
 def _populate_cell_text(elements: List[Element]) -> None:
