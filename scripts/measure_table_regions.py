@@ -42,9 +42,12 @@ NO_TABLE = [
 
 
 def lines_of(pdf: str, page_num: int):
+    """(lines, page height) -- the height matters, because furniture stripping
+    needs it and silently does nothing at the default of 0."""
     page = DocyxPipeline().process(str(CORPUS / pdf), pdf, pages=[page_num]).pages[0]
     text = [el for el in page.elements if is_orderable(el)]
-    return sorted(text, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x))
+    return (sorted(text, key=lambda el: (el.geometry.bbox.y, el.geometry.bbox.x)),
+            page.height)
 
 
 def covered(table, lines, wanted) -> float:
@@ -68,9 +71,9 @@ def main() -> int:
     recalls = []
     for path in sorted(TRUTH.glob("*.json")):
         truth = json.loads(path.read_text(encoding="utf-8"))
-        lines = lines_of(truth["document"], truth["page"])
+        lines, height = lines_of(truth["document"], truth["page"])
         wanted = {i for row in truth["grid"] for cell in row for i in cell}
-        tables = find_tables(lines, truth["page"])
+        tables = find_tables(lines, truth["page"], height)
         best = max((covered(t, lines, wanted) for t in tables), default=0.0)
         recalls.append(best)
         print(f"{truth['document'] + ' p' + str(truth['page']):24s} "
@@ -80,8 +83,8 @@ def main() -> int:
     print(f"{'page':24s} {'found':>5s}   shape")
     false_positives = 0
     for pdf, page_num, note in NO_TABLE:
-        lines = lines_of(pdf, page_num)
-        tables = find_tables(lines, page_num)
+        lines, height = lines_of(pdf, page_num)
+        tables = find_tables(lines, page_num, height)
         false_positives += len(tables)
         flag = "  <- FALSE POSITIVE" if tables else ""
         print(f"{pdf + ' p' + str(page_num):24s} {len(tables):5d}   {note}{flag}")

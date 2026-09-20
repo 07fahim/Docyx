@@ -255,7 +255,9 @@ class DocyxPipeline:
         # and it yields to an injected model, which had the image and the
         # first say.
         if self.table_geometry and not any(el.type == "table" for el in detected):
-            geometric, warning = _safely_lines("table_geometry", find_tables, native, page_num)
+            geometric, warning = _safely_lines(
+                "table_geometry", find_tables, native, page_num, height
+            )
             detected.extend(geometric)
             if warning:
                 warnings.append(warning)
@@ -283,10 +285,11 @@ def _safely_lines(
     run: Callable[..., List[Element]],
     lines: List[Element],
     page_num: int,
+    page_height: float,
 ) -> Tuple[List[Element], Optional[PageIssue]]:
     """`_safely` for a stage that reads extracted lines rather than pixels."""
     try:
-        return run(lines, page_num=page_num), None
+        return run(lines, page_num=page_num, page_height=page_height), None
     except Exception as exc:  # same contract: degrade the page, never the document
         return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))
 

@@ -115,6 +115,17 @@ ROW_OVERLAP = 0.4
 #: same column.
 COLUMN_TOLERANCE = 1.5
 
+#: A running head or foot sits inside this share of the page from the edge.
+#: `arxiv_gpt3` p7's real table header starts at 9.5%, so 8% keeps it out.
+FURNITURE_BAND = 0.08
+
+#: And is separated from the body by at least this multiple of the median gap
+#: between row bands. Measured: `rfc2616`'s running head is 3.1x and its foot
+#: 3.9x, against 1.0x for `nasa_budget` p88's table heading and 1.4x for
+#: `arxiv_gpt3` p7's. Both bounds must hold, so a table that merely starts
+#: high on the page keeps its header row.
+FURNITURE_GAP = 2.0
+
 ENGINE = "table-geometry-v1"
 
 
@@ -141,6 +152,36 @@ def _row_bands(lines: List[Element]) -> List[List[int]]:
         else:
             bands.append([index])
     return bands
+
+
+def _strip_furniture(lines: List[Element], bands: List[List[int]],
+                     page_height: float) -> List[List[int]]:
+    """Drop a running head or foot before looking for tables.
+
+    `RFC 2616 | HTTP/1.1 | June, 1999` is three short aligned cells at the top
+    of every page -- a perfect false anchor. It establishes three columns, and
+    the prose beneath is then pulled into the box with it. Five of the
+    fourteen false positives in the precision sample began exactly this way.
+
+    Removing it is correct regardless of what it does for detection: a running
+    head belongs to no table on the page.
+    """
+    if len(bands) < MIN_ROWS + 2 or page_height <= 0:
+        return bands
+
+    tops = [min(lines[i].geometry.bbox.y for i in band) for band in bands]
+    gaps = [b - a for a, b in zip(tops, tops[1:])]
+    median = _median(gaps)
+    if median <= 0:
+        return bands
+
+    first, last = 0, len(bands)
+    if tops[0] < page_height * FURNITURE_BAND and gaps[0] >= median * FURNITURE_GAP:
+        first = 1
+    if (tops[-1] > page_height * (1 - FURNITURE_BAND)
+            and gaps[-1] >= median * FURNITURE_GAP):
+        last -= 1
+    return bands[first:last]
 
 
 def _columns(lines: List[Element], indices: Sequence[int], tolerance: float) -> List[float]:
@@ -263,7 +304,8 @@ def _element(element_id: str, bbox: BoundingBox, type_: str,
     )
 
 
-def find_tables(lines: List[Element], page_num: int = 0) -> List[Element]:
+def find_tables(lines: List[Element], page_num: int = 0,
+                page_height: float = 0.0) -> List[Element]:
     """`table` elements with `table_cell` children, inferred from line positions.
 
     Takes the page's extracted text lines and returns detections in the same
@@ -274,7 +316,7 @@ def find_tables(lines: List[Element], page_num: int = 0) -> List[Element]:
     if len(lines) < MIN_COLUMNS * MIN_ROWS:
         return []
 
-    bands = _row_bands(lines)
+    bands = _strip_furniture(lines, _row_bands(lines), page_height)
     tables: List[Element] = []
 
     # Grow a run of consecutive bands for as long as it still reads as a table.
