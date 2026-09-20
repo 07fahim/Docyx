@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from docyx.core.geometry import BoundingBox
+from docyx.schema.models import ASSIGNABLE_TYPES
 from docyx.workspace.server import Workspace, serve
 
 
@@ -286,7 +287,7 @@ def test_export_writes_every_page_including_unvisited_ones(base_url, tmp_path, p
     assert len(exported["pages"]) == 3
     assert exported["page_count"] == 3
     assert exported["pages"][0]["elements"][0]["text"] == "kept"
-    assert exported["schema_version"] == "1.7"
+    assert exported["schema_version"] == "1.8"
 
 
 def test_export_defaults_beside_the_pdf(pdf):
@@ -440,3 +441,218 @@ def test_importing_with_no_saved_file_is_a_404(base_url):
         post(f"{base_url}/api/import", {"path": "no_such_file.json"})
 
     assert exc.value.code == 404
+
+
+# --- category ---------------------------------------------------------------
+
+
+def test_assignable_types_cover_the_orderable_roles():
+    """`ASSIGNABLE_TYPES` is written out in models.py because reading_order
+    imports that module. This is what stops the two drifting."""
+    from docyx.analysis.reading_order import TEXT_ROLES
+
+    assert TEXT_ROLES <= ASSIGNABLE_TYPES
+    assert {"table", "figure"} <= ASSIGNABLE_TYPES
+    # Containers are deliberately absent: a person is not reassigning those.
+    assert not {"text_region", "table_cell", "text_span", "rule"} & ASSIGNABLE_TYPES
+
+
+def test_retyping_keeps_what_the_machine_called_it(pdf):
+    """Without a layout model every element is `text`, so a title, a heading
+    and a paragraph are indistinguishable until a person says otherwise."""
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+    assert element.type == "text", "the default really is flat"
+
+    workspace.retype(0, element.id, "section_header")
+
+    assert element.type == "section_header"
+    assert element.provenance.original_type == "text"
+    assert element.provenance.modified_by_user is True
+    assert element.confidence.type.value == "exact"
+    workspace.close()
+
+
+def test_retyping_twice_keeps_the_original_not_the_first_choice(pdf):
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+
+    workspace.retype(0, element.id, "title")
+    workspace.retype(0, element.id, "section_header")
+
+    assert element.provenance.original_type == "text"
+    workspace.close()
+
+
+def test_a_type_edit_never_overwrites_the_other_originals(pdf):
+    """Three claims, three separate guards. Sharing one meant whichever edit
+    came last recorded nothing."""
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+    was_text, was_box = element.text, element.geometry.bbox.model_dump()
+
+    workspace.retype(0, element.id, "title")
+    workspace.edit(0, element.id, "corrected")
+    workspace.move(0, element.id, BoundingBox(x=1, y=1, width=9, height=9))
+
+    assert element.provenance.original_type == "text"
+    assert element.provenance.original_text == was_text
+    assert element.provenance.original_geometry["bbox"] == was_box
+    workspace.close()
+
+
+def test_an_unknown_type_is_refused(pdf):
+    """`type` is a bare string, so an unchecked value would become a silent
+    new element type that nothing downstream handles."""
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+
+    with pytest.raises(ValueError):
+        workspace.retype(0, element.id, "Section-header")  # the export's casing
+
+    assert element.type == "text"
+    workspace.close()
+
+
+def test_undo_restores_the_type_too(base_url):
+    before = json.loads(get(f"{base_url}/api/page?page=0"))["page"]["elements"][0]
+
+    post(f"{base_url}/api/retype?page=0", {"id": before["id"], "type": "title"})
+    undone = post(f"{base_url}/api/undo?page=0", {})["element"]
+
+    assert undone["type"] == before["type"]
+    assert undone["provenance"]["modified_by_user"] is False
+    assert "original_type" not in undone["provenance"]
+
+
+def test_a_retype_round_trips_through_export_and_import(pdf, tmp_path):
+    first = Workspace(pdf)
+    element = first.page(0).pages[0].elements[0]
+    first.retype(0, element.id, "section_header")
+    path = first.export(str(tmp_path / "typed.json"))
+    first.close()
+
+    fresh = Workspace(pdf)
+    report = fresh.restore(str(path))
+
+    assert report["applied"] == 1
+    restored = fresh.find(0, element.id)
+    assert restored.type == "section_header"
+    assert restored.provenance.original_type == "text"
+    fresh.close()
+
+
+def test_a_changed_type_is_a_conflict(pdf, tmp_path):
+    first = Workspace(pdf)
+    element = first.page(0).pages[0].elements[0]
+    first.retype(0, element.id, "title")
+    path = first.export(str(tmp_path / "typed.json"))
+    first.close()
+
+    fresh = Workspace(pdf)
+    fresh.find(0, element.id).type = "caption"  # stand in for an extraction change
+    report = fresh.restore(str(path))
+
+    assert report["applied"] == 0
+    assert report["conflicts"][0]["field"] == "type"
+    assert fresh.find(0, element.id).type == "caption"
+    fresh.close()
+
+
+def test_the_vocabulary_travels_with_the_page(base_url):
+    """The viewer builds its control from this, so it cannot offer a type the
+    server would refuse."""
+    types = json.loads(get(f"{base_url}/api/page?page=0"))["types"]
+
+    assert set(types) == ASSIGNABLE_TYPES
+
+
+# --- heading suggestions ----------------------------------------------------
+
+
+def test_suggestions_are_proposed_never_applied(pdf):
+    """The machine proposes and a person accepts. Writing `type` here would
+    force a lie about confidence: the text was read exactly even when the
+    category is a guess."""
+    workspace = Workspace(pdf)
+    before = [el.type for el in workspace.page(0).pages[0].elements]
+
+    workspace.suggest_headings(0)
+
+    assert [el.type for el in workspace.page(0).pages[0].elements] == before
+    workspace.close()
+
+
+def test_a_page_with_no_dominant_body_size_proposes_nothing(tmp_path):
+    """A form has no body size, so "bigger than body" stops meaning "heading".
+    Measured: irs_fw9 p0 proposed 15 of 133 lines, mostly wrong."""
+    from docyx.analysis.headings import body_size
+
+    doc = fitz.open()
+    page = doc.new_page()
+    for i, size in enumerate([7, 9, 11, 13, 15, 17, 19, 21, 23, 25]):
+        page.insert_text((72, 80 + i * 40), f"line {i}", fontsize=size)
+    path = tmp_path / "form.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    workspace = Workspace(str(path))
+    assert body_size(workspace.page(0).pages[0].elements) is None
+    assert workspace.suggest_headings(0) == []
+    workspace.close()
+
+
+def test_a_heading_is_proposed_on_prose(tmp_path):
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 80), "A Much Bigger Heading", fontsize=20)
+    for i in range(12):
+        page.insert_text((72, 120 + i * 20), f"body line {i} of ordinary prose", fontsize=10)
+    path = tmp_path / "prose.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    workspace = Workspace(str(path))
+    suggestions = workspace.suggest_headings(0)
+
+    assert len(suggestions) == 1
+    assert suggestions[0]["type"] == "title"
+    assert workspace.find(0, suggestions[0]["id"]).text.startswith("A Much Bigger")
+    workspace.close()
+
+
+def test_two_lines_at_the_largest_size_are_headings_not_two_titles(tmp_path):
+    """A page has at most one title. `wiki_ar.pdf` p6 has two same-sized
+    section headings and no title at all."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 80), "First Section", fontsize=16)
+    page.insert_text((72, 300), "Second Section", fontsize=16)
+    for i in range(12):
+        page.insert_text((72, 120 + i * 12), f"body line {i}", fontsize=10)
+    path = tmp_path / "two.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    workspace = Workspace(str(path))
+    assert {s["type"] for s in workspace.suggest_headings(0)} == {"section_header"}
+    workspace.close()
+
+
+def test_a_suggestion_does_not_overwrite_a_human_or_a_model(tmp_path):
+    """Both outrank a font-size guess."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 80), "A Much Bigger Heading", fontsize=20)
+    for i in range(12):
+        page.insert_text((72, 120 + i * 20), f"body line {i} of ordinary prose", fontsize=10)
+    path = tmp_path / "prose.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    workspace = Workspace(str(path))
+    heading_id = workspace.suggest_headings(0)[0]["id"]
+    workspace.retype(0, heading_id, "caption")
+
+    assert workspace.suggest_headings(0) == [], "a human's answer is not re-proposed"
+    workspace.close()

@@ -1,4 +1,4 @@
-"""The published output schema. See schema/v1.7.json for the generated form."""
+"""The published output schema. See schema/v1.8.json for the generated form."""
 
 import unicodedata
 from enum import Enum
@@ -126,6 +126,17 @@ class GridPosition(BaseModel):
     is_header: bool = False
 
 
+#: What a human may set `type` to (§8). Written out rather than imported from
+#: `reading_order`, which imports this module; `test_assignable_types_cover_
+#: the_orderable_roles` fails if the two drift. Containers are deliberately
+#: absent: `text_region` and `table_cell` describe structure a person is not
+#: reassigning one block at a time.
+ASSIGNABLE_TYPES = frozenset({
+    "text", "title", "section_header", "caption", "footnote",
+    "formula", "list_item", "page_header", "page_footer", "table", "figure",
+})
+
+
 class Element(BaseModel):
     id: str
     type: str
@@ -153,6 +164,23 @@ class Element(BaseModel):
             self.provenance.original_text = self.text or ""
         self.provenance.modified_by_user = True
         self.text = text
+        self.confidence = Confidence(value=1.0, type=ConfidenceType.EXACT)
+        return self
+
+    def edit_type(self, type_: str) -> "Element":
+        """Correct the block's category (§8), preserving the machine's own.
+
+        The third editable claim, and the one with no automatic answer:
+        without a layout model every line is `text`, so a paper's title, its
+        section headers and its footnotes are indistinguishable. A person
+        reading the page is the only source of that distinction.
+        """
+        if type_ not in ASSIGNABLE_TYPES:
+            raise ValueError(f"{type_!r} is not an assignable type")
+        if self.provenance.original_type is None:
+            self.provenance.original_type = self.type
+        self.provenance.modified_by_user = True
+        self.type = type_
         self.confidence = Confidence(value=1.0, type=ConfidenceType.EXACT)
         return self
 
@@ -196,7 +224,7 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.7"
+    schema_version: str = "1.8"
     document_id: str
     filename: Optional[str] = None
     #: The document's own length, which differs from len(pages) when a subset

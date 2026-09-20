@@ -43,3 +43,6 @@ class Provenance(BaseModel):
     #: Where the machine put it, same contract as `original_text`. Typed loosely
     #: to keep this module free of a geometry import it would otherwise not need.
     original_geometry: Optional[Dict[str, Any]] = None
+    #: What the machine called it. Guarded separately from the other two, so
+    #: correcting one claim never discards the record of another.
+    original_type: Optional[str] = None

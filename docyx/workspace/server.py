@@ -22,10 +22,11 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import ValidationError
 
+from docyx.analysis.headings import suggest
 from docyx.core.geometry import BoundingBox
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pipeline.extractor import DocyxPipeline
-from docyx.schema.models import Document, Element, Page
+from docyx.schema.models import ASSIGNABLE_TYPES, Document, Element, Page
 
 STATIC = Path(__file__).parent / "static"
 
@@ -65,6 +66,7 @@ def _snapshot(element: Element) -> Dict[str, Any]:
     """
     return {
         "text": element.text,
+        "type": element.type,
         "geometry": element.geometry.model_copy(deep=True),
         "confidence": element.confidence.model_copy(deep=True),
         "provenance": element.provenance.model_copy(deep=True),
@@ -73,6 +75,7 @@ def _snapshot(element: Element) -> Dict[str, Any]:
 
 def _restore(element: Element, state: Dict[str, Any]) -> Element:
     element.text = state["text"]
+    element.type = state["type"]
     element.geometry = state["geometry"]
     element.confidence = state["confidence"]
     element.provenance = state["provenance"]
@@ -123,6 +126,20 @@ class Workspace:
     def move(self, index: int, element_id: str, bbox: BoundingBox) -> Element:
         """Correct an element's position or size through `edit_geometry` (§10)."""
         return self._record(index, self.find(index, element_id)).edit_geometry(bbox)
+
+    def retype(self, index: int, element_id: str, type_: str) -> Element:
+        """Correct the block's category through `edit_type` (§8)."""
+        return self._record(index, self.find(index, element_id)).edit_type(type_)
+
+    def suggest_headings(self, index: int) -> List[Dict[str, str]]:
+        """Propose heading categories from font size, without applying them.
+
+        A suggestion a person accepts is applied through `retype`, so the
+        record says a human decided — which is true, and avoids claiming a
+        font-size guess is as good as reading the text.
+        """
+        return [{"id": i, "type": t}
+                for i, t in suggest(self.page(index).pages[0].elements)]
 
     # --- undo/redo -------------------------------------------------------
     # Per page, because a page is the unit a person works on and a single
@@ -227,6 +244,7 @@ class Workspace:
             return
 
         was_text = provenance.get("original_text")
+        was_type = provenance.get("original_type")
         was_box = (provenance.get("original_geometry") or {}).get("bbox")
 
         # Already carrying this exact edit. Without this, importing the same
@@ -234,6 +252,8 @@ class Workspace:
         # matches its own `original_text`, because it is the correction.
         if (target.provenance.modified_by_user
                 and target.provenance.original_text == was_text
+                and target.provenance.original_type == was_type
+                and target.type == saved_element["type"]
                 and (target.text or "") == (saved_element.get("text") or "")
                 and _same_box(saved_element["geometry"]["bbox"],
                               target.geometry.bbox.model_dump())):
@@ -246,6 +266,12 @@ class Workspace:
                 "then": was_text, "now": target.text,
             })
             return
+        if was_type is not None and target.type != was_type:
+            report["conflicts"].append({
+                "page": index, "id": element_id, "field": "type",
+                "then": was_type, "now": target.type,
+            })
+            return
         if was_box is not None and not _same_box(was_box, target.geometry.bbox.model_dump()):
             report["conflicts"].append({
                 "page": index, "id": element_id, "field": "geometry",
@@ -255,6 +281,8 @@ class Workspace:
 
         # Through `move`/`edit`, so restored edits land on the undo stack and
         # re-record their originals from values just proven identical.
+        if was_type is not None:
+            self.retype(index, element_id, saved_element["type"])
         if was_box is not None:
             self.move(index, element_id, BoundingBox(**saved_element["geometry"]["bbox"]))
         if was_text is not None:
@@ -296,6 +324,7 @@ def _handler(workspace: Workspace):
                         "page_count": workspace.page_count,
                         "index": index,
                         "history": workspace.history(index),
+                        "types": sorted(ASSIGNABLE_TYPES),
                         "page": json.loads(
                             document.pages[0].model_dump_json(exclude_none=True)
                         ),
@@ -319,8 +348,8 @@ def _handler(workspace: Workspace):
 
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's API
             url = urlparse(self.path)
-            routes = ("/api/edit", "/api/move", "/api/undo", "/api/redo",
-                      "/api/export", "/api/import")
+            routes = ("/api/edit", "/api/move", "/api/retype", "/api/suggest",
+                      "/api/undo", "/api/redo", "/api/export", "/api/import")
             if url.path not in routes:
                 self._send(404, b"not found", "text/plain")
                 return
@@ -349,6 +378,11 @@ def _handler(workspace: Workspace):
                     self._element(workspace.undo(index), index)
                 elif url.path == "/api/redo":
                     self._element(workspace.redo(index), index)
+                elif url.path == "/api/suggest":
+                    body_out = {"suggestions": workspace.suggest_headings(index)}
+                    self._send(200, json.dumps(body_out).encode(), "application/json")
+                elif url.path == "/api/retype":
+                    self._element(workspace.retype(index, body["id"], body["type"]), index)
                 elif url.path == "/api/move":
                     self._element(
                         workspace.move(index, body["id"], BoundingBox(**body["bbox"])),

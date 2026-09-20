@@ -12,8 +12,8 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (265 tests, ~35s)
-.venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.7.json after a schema change
+.venv/Scripts/python.exe -m pytest -q            # full suite (279 tests, ~32s)
+.venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
 ```
@@ -143,7 +143,7 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 
 ### The schema is a published contract
 
-`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` (`Page.coordinate_system`, `GridPosition.is_header`). `v1.6` (`Element.script`, `Document.filename`/`page_count`, named typography flags). `v1.7` is current — `Provenance.original_geometry`, which bbox editing needs to be non-destructive. All additive; none add a guess.
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` (`Page.coordinate_system`, `GridPosition.is_header`). `v1.6` (`Element.script`, `Document.filename`/`page_count`, named typography flags). `v1.7` (`Provenance.original_geometry`, which bbox editing needs to be non-destructive). `v1.8` is current — `Provenance.original_type`, the same for the block's category. All additive; none add a guess.
 
 `PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
 
@@ -155,7 +155,9 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 - **`original_text` is written on the first edit only.** The obvious implementation overwrites it every time, which destroys the machine's value on the second save. Pinned by `test_editing_twice_keeps_the_ORIGINAL_not_the_first_correction`.
 - **An edited element becomes `exact` / 1.0.** A person reading the rendered page outranks any extractor, and on a damaged text layer they are the only authority available.
 
-`edit_geometry()` (§10) is the twin, added with the workspace's bbox handles, and `original_geometry` is guarded separately from `original_text` — see **Workspace** for why sharing one guard silently loses whichever edit came second.
+`edit_geometry()` (§10) and `edit_type()` (§8) are the twins. **Three claims, three separate guards** — `original_text`, `original_geometry`, `original_type`. Gating them on the shared `modified_by_user` flag means whichever edit came second records nothing: correct the text of a block you already recategorised, and the machine's own category is silently gone. Pinned by `test_a_type_edit_never_overwrites_the_other_originals`.
+
+**`edit_type` is the one claim with no automatic answer.** Without a layout model every extracted line is `text`, so a paper's title, its section headers and its paragraphs are indistinguishable — and the `blocks` export labels all of them `Text`. `ASSIGNABLE_TYPES` (models.py) is the closed vocabulary, deliberately the DocLayNet 11 and nothing more: a label outside the export target's categories is a label no consumer can use and no model will ever predict. Containers are excluded — nobody reassigns `text_region` or `table_cell` one block at a time.
 
 ### The text-layer gate has two stages
 
@@ -208,6 +210,29 @@ Figures are cropped by re-rendering the page rather than holding page images thr
 - **`formula` is dropped and reported, not relabelled.** DocLayNet has 11 classes and this format carries 10. Exporting a formula as `Text` would poison the very labels the export exists to produce; an unannotated block is something a reviewer catches, a mislabelled one is not.
 - **`validate()` mirrors the consumer-side checks and runs before writing.** Claiming compatibility is cheap; refusing to write a file an annotation tool would reject is what makes the claim testable. Unknown category, wrong field set, inside-out or upside-down box, anything below 1, anything past the image edge.
 - **The category is only as good as `type`, which is why it is editable.** Without a layout model every element is `text`, so a title, a section header and a paragraph all export as `Text`. `edit_type()` and the workspace's type control are what make this field mean anything — see **Human edits are provenance**.
+
+### Heading suggestions from typography
+
+[docyx/analysis/headings.py](docyx/analysis/headings.py) proposes `title` and `section_header` from font size. `markdown.py` already ranked sizes to render `#` and then discarded the ranking; this offers it as a suggestion instead. No weights, no download, no GPU.
+
+**It proposes and never writes**, which is not squeamishness — it is forced. Mutating `type` during extraction would require a lie about confidence: downgrading the element to `detected` claims the *text* is uncertain when it was read exactly, while leaving it `exact` shows a guessed category in the trust colour. `Confidence` describes the whole element, but an element now carries three claims — text, geometry, type — that differ in how sure they are. Until those are separated, "a suggestion a person accepts" is the honest shape: the workspace's `Suggest` button applies each one through `edit_type`, so the record says a human decided, which is true.
+
+**It only fires on prose.** The share of lines at the modal font size separates the corpus cleanly, with nothing near the boundary:
+
+| page | modal share | proposals |
+|---|---|---|
+| `rfc2616` p12 | 96% | 2, both correct |
+| `wiki_ar` p6 | 91% | 2, both correct |
+| `wiki_bn` p5 / `nasa_budget` p88 | 89% | correct |
+| `arxiv_attention` p0 | 46% | 6, one wrong |
+| `irs_f1040` p0 | 71% | 7, unreliable |
+| `irs_fw9` p0 | 44% | **15 of 133 lines, mostly wrong** |
+
+A form has no dominant body size, so "bigger than body" stops meaning "heading" and starts meaning "one of the other six sizes on this page". Below `MIN_BODY_SHARE` (0.8) it proposes nothing — the same rule the alignment code follows, where an absent value beats a wrong one.
+
+**A page has at most one title.** Two lines sharing the largest size are two section headings, which is exactly what `wiki_ar.pdf` p6 is; calling both `title` was the first version's bug.
+
+The worry that drove the measurement — that Arabic and Bengali mark hierarchy by ornament rather than size — **did not hold**. Arabic scored 2/2 and Bengali 1/1. Forms are the failure mode, not scripts.
 
 ### Markdown export doubles as an evaluation instrument
 
@@ -412,6 +437,8 @@ Three rules hold the UI together, and each one is load-bearing rather than decor
 Selecting an element scrims the page around it rather than tinting it, so the element's own pixels stay at full contrast — checking a claim against the pixels it came from is the whole job.
 
 **Zoom** (`−`/`+`/`0`, or the pill on the page) multiplies the fit scale rather than replacing it, so the percentage shown is the real one against the image. It was added because bbox handles shipped with no way to get close to them, which made small boxes uneditable in practice. The bench only gains a horizontal scrollbar above 1×, where the page genuinely is wider than it.
+
+**The category is editable**, through a control in the inspector rather than free text: the vocabulary travels with the page (`/api/page` carries `types`), so the viewer cannot offer a type the server would refuse. `Suggest` applies the typography proposals above, one `retype` each, so every one is separately undoable.
 
 **`Labels` (`L`) tags every box `4. section_header`** — the same number the outline shows, so the two panes name an element identically. Off by default because 57 tags hide a dense page, and **top-level only**: tagging a line's own style runs is the same over-listing the outline avoids.
 

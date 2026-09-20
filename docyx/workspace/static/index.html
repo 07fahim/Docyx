@@ -168,6 +168,10 @@
   /* The claim: what this element says it is, and what it says. */
   .claim { font-family: var(--machine); font-size: 12px; color: var(--ink-subtle); }
   .claim b { color: var(--ink); }
+  .claim select { font: inherit; font-family: var(--machine); font-size: 12px;
+                  color: var(--ink); background: var(--bench);
+                  border: 1px solid var(--hair-strong); border-radius: var(--r-xs);
+                  padding: 2px 4px; cursor: pointer; }
   .said {
     margin: 8px 0 0; padding: 12px; background: var(--bench);
     border-left: 2px solid var(--hair-strong); border-radius: 0 var(--r-md) var(--r-md) 0;
@@ -253,6 +257,7 @@
       <button id="export" title="Write the whole document beside the PDF">Export</button>
       <button id="import" title="Reattach edits from a previous export">Import</button>
       <span class="sep"></span>
+      <button id="suggest" title="Propose heading categories from font size">Suggest</button>
       <button id="labels" title="Label every box (L)" aria-pressed="false">Labels</button>
       <button id="theme" title="Light or dark">&#9680;</button>
       <span class="sep"></span>
@@ -302,7 +307,7 @@ const $ = id => document.getElementById(id);
 const state = {
   index: 0, elements: [], image: null, selected: null, hovered: null,
   scale: 1, hidden: new Set(), rows: [], top: [], history: { undo: 0, redo: 0 },
-  conflicts: [], orphans: [],
+  conflicts: [], orphans: [], types: [],
   zoom: 1, fit: 1, labels: false,
 };
 
@@ -570,6 +575,7 @@ async function send(path, body) {
    this object; replacing it would orphan every one of them. */
 function patch(el, updated) {
   el.text = updated.text ?? null;
+  el.type = updated.type;
   el.geometry = updated.geometry;
   el.confidence = updated.confidence;
   el.provenance = updated.provenance;
@@ -663,7 +669,14 @@ function render(el) {
 
   box.innerHTML = `<div class="sect">
     <div class="label" style="margin-bottom:8px">Element</div>
-    <div class="claim"><b>${esc(el.type)}</b>${el.id ? ` &middot; ${esc(el.id)}` : ""}</div>
+    <div class="claim">${editable
+      ? `<select id="retype" title="What kind of block is this?">${
+          state.types.map(t =>
+            `<option value="${t}"${t === el.type ? " selected" : ""}>${t}</option>`
+          ).join("")}</select>`
+      : `<b>${esc(el.type)}</b>`
+    }${el.id ? ` &middot; ${esc(el.id)}` : ""}</div>
+    ${p.original_type ? `<div class="was">was ${esc(p.original_type)}</div>` : ""}
     ${p.original_text ? `<div class="was">${esc(p.original_text)}</div>` : ""}
     ${el.text != null ? `<div class="said${el.direction === "rtl" ? " rtl" : ""}"
       ${editable ? `id="edit" contenteditable="true" spellcheck="false"` : ""}
@@ -701,7 +714,17 @@ function render(el) {
   if (el.children && el.children.length) row(dl, "Children", el.children.length);
 
   box.querySelector("pre").textContent = JSON.stringify(el, null, 2);
-  if (editable) wireEdit(el);
+  if (editable) {
+    wireEdit(el);
+    // The category has no automatic answer without a layout model, so this is
+    // the one claim a person is always the authority on.
+    $("retype").onchange = async ev => {
+      const body = await send("/api/retype", { id: el.id, type: ev.target.value });
+      if (!body) { ev.target.value = el.type; return; }
+      patch(el, body.element);
+      census(); buildOutline(); select(el);
+    };
+  }
 }
 
 /* The only writer. `edit_text` runs server-side on the cached Document, so
@@ -789,6 +812,7 @@ async function load(index) {
     `<div class="issue ${cls}"><span>&#9888;</span><div>
        <code>${esc(i.code)}</code><p>${esc(i.message)}</p></div></div>`).join("");
 
+  state.types = data.types || [];
   setHistory(data.history);
   census();
   buildOutline();
@@ -844,6 +868,28 @@ const zoomStep = dir => setZoom(
 $("zoomIn").onclick = () => zoomStep(1);
 $("zoomOut").onclick = () => zoomStep(-1);
 $("zoomFit").onclick = () => setZoom(1);
+
+/* Proposals, applied one by one through /api/retype, so each lands on the
+   undo stack and each records a human as the authority — which is true, the
+   person pressed the button. */
+$("suggest").onclick = async () => {
+  $("suggest").disabled = true;
+  const body = await send("/api/suggest", {});
+  if (body) {
+    const list = body.suggestions || [];
+    if (!list.length) {
+      toast("No headings to propose — this page has no dominant body size");
+    } else {
+      for (const s of list) {
+        const applied = await send("/api/retype", s);
+        if (applied) patch(state.elements.find(e => e.id === s.id) || {}, applied.element);
+      }
+      census(); buildOutline(); select(null);
+      toast(`${list.length} heading(s) proposed and applied — Ctrl+Z to undo`);
+    }
+  }
+  $("suggest").disabled = false;
+};
 
 $("labels").onclick = () => {
   state.labels = !state.labels;
