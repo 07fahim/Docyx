@@ -223,10 +223,28 @@ survived while naming *different content* — the failure that silently
 reattaches a correction to the wrong line. One is traceable to the
 "blank spans must not be skipped" fix.
 
-**Verdict: resume is safe within a version, unsafe across one.** It needs a
-content hash beside the id (match → reattach, differ → flag, absent →
-orphan), which is the discipline `.corpus/truth/` already uses. Run
-`--against` before shipping any extraction change.
+**Verdict: resume is safe within a version, unsafe across one** — so it was
+built to verify rather than to trust.
+
+**Fifth slice: resume.** `POST /api/import` → `Workspace.restore()`. The
+export is the save file; there is no second format. The check is
+`original_text` / `original_geometry` against what the extractor says *now*
+— the machine's own claim at the time of the edit. Four outcomes: reattach,
+`unchanged`, `EDIT_CONFLICT`, `EDIT_ORPHANED`, and only the first writes.
+
+Verified end to end across a real process restart: edit → export → kill the
+server → start a new one → Import. `EDITED 0` became `EDITED 1` with the
+corrected Bengali and an undoable history entry. Then the saved
+`original_text` was tampered with and re-imported: **0 reattached, 1
+conflicted, nothing written**, with the conflict rendered beside the
+`COMBINING_MARK_ORDER` warning naming both values.
+
+`unchanged` exists because without it a second import reports every edit as
+a conflict — the target no longer matches its own `original_text`, since it
+is now the correction.
+
+Edits still do not survive without an explicit Export; there is no
+autosave, and that is the next judgement call rather than a defect.
 
 ## Decisions settled
 

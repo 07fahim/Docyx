@@ -329,3 +329,114 @@ def test_a_failed_page_does_not_block_export(tmp_path):
 
     assert [p["status"] for p in exported["pages"]] == ["ok", "failed"]
     workspace.close()
+
+
+# --- resume ----------------------------------------------------------------
+
+
+def edited_export(pdf, tmp_path, text="corrected"):
+    """Edit one line, export, and hand back a fresh Workspace over the same PDF."""
+    first = Workspace(pdf)
+    element = first.page(0).pages[0].elements[0]
+    machine_said = element.text
+    first.edit(0, element.id, text)
+    path = first.export(str(tmp_path / "saved.json"))
+    first.close()
+    return Workspace(pdf), element.id, machine_said, path
+
+
+def test_a_saved_edit_is_reattached_when_the_extraction_still_agrees(pdf, tmp_path):
+    fresh, element_id, machine_said, path = edited_export(pdf, tmp_path)
+
+    report = fresh.restore(str(path))
+
+    assert (report["applied"], report["conflicts"], report["orphans"]) == (1, [], [])
+    # Idempotent: without this, a second import reports every edit as a
+    # conflict, because the target no longer matches its own original_text.
+    again = fresh.restore(str(path))
+    assert (again["applied"], again["unchanged"], again["conflicts"]) == (0, 1, [])
+    restored = fresh.find(0, element_id)
+    assert restored.text == "corrected"
+    assert restored.provenance.original_text == machine_said
+    assert restored.provenance.modified_by_user is True
+    fresh.close()
+
+
+def test_a_changed_line_is_a_conflict_and_is_never_applied(pdf, tmp_path):
+    """The measured failure: an id survives a code change while naming
+    different content. Reattaching on the id alone moves a human correction
+    onto a line that changed underneath it, with nothing to show for it."""
+    fresh, element_id, machine_said, path = edited_export(pdf, tmp_path)
+    # Stand in for an extraction change: the machine now says something else.
+    fresh.find(0, element_id).text = "the extractor changed its mind"
+
+    report = fresh.restore(str(path))
+
+    assert report["applied"] == 0
+    assert report["conflicts"][0]["id"] == element_id
+    assert report["conflicts"][0]["then"] == machine_said
+    assert fresh.find(0, element_id).text == "the extractor changed its mind"
+    assert fresh.find(0, element_id).provenance.modified_by_user is False
+    fresh.close()
+
+
+def test_a_vanished_id_is_reported_orphaned_not_silently_dropped(pdf, tmp_path):
+    fresh, element_id, _, path = edited_export(pdf, tmp_path)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    saved["pages"][0]["elements"][0]["id"] = "page1_b99_l99"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+
+    report = fresh.restore(str(path))
+
+    assert report["applied"] == 0
+    assert report["orphans"] == [{"page": 0, "id": "page1_b99_l99"}]
+    fresh.close()
+
+
+def test_a_moved_box_round_trips_through_its_original_geometry(pdf, tmp_path):
+    first = Workspace(pdf)
+    element = first.page(0).pages[0].elements[0]
+    machine_box = element.geometry.bbox.model_dump()
+    first.move(0, element.id, BoundingBox(x=11, y=22, width=33, height=44))
+    path = first.export(str(tmp_path / "moved.json"))
+    first.close()
+
+    fresh = Workspace(pdf)
+    report = fresh.restore(str(path))
+
+    assert report["applied"] == 1
+    restored = fresh.find(0, element.id)
+    assert restored.geometry.bbox.model_dump() == {"x": 11, "y": 22, "width": 33, "height": 44}
+    assert restored.provenance.original_geometry["bbox"] == machine_box
+    fresh.close()
+
+
+def test_restoring_is_undoable(pdf, tmp_path):
+    """Reattach goes through `edit`/`move`, so an unwanted import is one
+    Ctrl+Z away rather than a thing you live with."""
+    fresh, element_id, machine_said, path = edited_export(pdf, tmp_path)
+
+    fresh.restore(str(path))
+    fresh.undo(0)
+
+    assert fresh.find(0, element_id).text == machine_said
+    assert fresh.find(0, element_id).provenance.modified_by_user is False
+    fresh.close()
+
+
+def test_untouched_elements_are_not_reattached(pdf, tmp_path):
+    """Only `modified_by_user` elements are carried over; re-applying every
+    element would rewrite the whole page from a stale file."""
+    fresh, _, _, path = edited_export(pdf, tmp_path)
+
+    report = fresh.restore(str(path))
+
+    assert report["applied"] == 1, "the export holds many elements, one of them edited"
+    fresh.close()
+
+
+def test_importing_with_no_saved_file_is_a_404(base_url):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        post(f"{base_url}/api/import", {"path": "no_such_file.json"})
+
+    assert exc.value.code == 404

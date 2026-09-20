@@ -220,6 +220,7 @@
       <button id="undo" title="Undo (Ctrl+Z)">&#8630;</button>
       <button id="redo" title="Redo (Ctrl+Shift+Z)">&#8631;</button>
       <button id="export" title="Write the whole document beside the PDF">Export</button>
+      <button id="import" title="Reattach edits from a previous export">Import</button>
       <span class="sep"></span>
       <button id="prev" title="Previous page (&larr;)">&larr;</button>
       <span id="pageno">&mdash;</span>
@@ -255,6 +256,7 @@ const $ = id => document.getElementById(id);
 const state = {
   index: 0, elements: [], image: null, selected: null, hovered: null,
   scale: 1, hidden: new Set(), rows: [], top: [], history: { undo: 0, redo: 0 },
+  conflicts: [], orphans: [],
 };
 
 // An edit outranks the confidence it replaced, so it is its own tier.
@@ -519,6 +521,32 @@ function toast(message, bad) {
   toastTimer = setTimeout(() => { box.hidden = true; }, bad ? 6000 : 3500);
 }
 
+/* An import that silently dropped what it could not reattach would be worse
+   than no import: the edits are gone and nothing says so. They surface as
+   page issues, in the same place a gate warning does. */
+const brief = v => typeof v === "object" && v
+  ? `x ${Math.round(v.x)} y ${Math.round(v.y)} ${Math.round(v.width)}×${Math.round(v.height)}`
+  : `"${v}"`;
+
+function importIssues(index) {
+  const rows = [];
+  for (const c of state.conflicts.filter(c => c.page === index)) {
+    rows.push([{
+      code: "EDIT_CONFLICT",
+      message: `${c.id} — the extractor now says ${brief(c.now)}, but the saved `
+        + `edit was made against ${brief(c.then)}. Not applied.`,
+    }, "err"]);
+  }
+  for (const o of state.orphans.filter(o => o.page === index)) {
+    rows.push([{
+      code: "EDIT_ORPHANED",
+      message: `${o.id} no longer exists in this extraction. Its correction `
+        + `could not be placed.`,
+    }, "err"]);
+  }
+  return rows;
+}
+
 async function timeTravel(path) {
   const body = await send(path, {});
   if (!body) return;
@@ -685,7 +713,8 @@ async function load(index) {
     `<b>${esc(p.status)}</b><span class="label">${esc(p.source_type)}</span>`;
 
   const issues = (p.errors || []).map(i => [i, "err"])
-    .concat((p.warnings || []).map(i => [i, ""]));
+    .concat((p.warnings || []).map(i => [i, ""]))
+    .concat(importIssues(data.index));
   $("issues").innerHTML = issues.map(([i, cls]) =>
     `<div class="issue ${cls}"><span>&#9888;</span><div>
        <code>${esc(i.code)}</code><p>${esc(i.message)}</p></div></div>`).join("");
@@ -718,6 +747,22 @@ $("export").onclick = async () => {
   const body = await send("/api/export", {});
   if (body) toast(`Wrote ${body.path}`);
   $("export").disabled = false;
+};
+
+$("import").onclick = async () => {
+  $("import").disabled = true;
+  toast("Reading saved edits…");
+  const report = await send("/api/import", {});
+  $("import").disabled = false;
+  if (!report) return;
+  state.conflicts = report.conflicts || [];
+  state.orphans = report.orphans || [];
+  const unplaced = state.conflicts.length + state.orphans.length;
+  const parts = [`${report.applied} reattached`];
+  if (state.conflicts.length) parts.push(`${state.conflicts.length} conflicted`);
+  if (state.orphans.length) parts.push(`${state.orphans.length} orphaned`);
+  toast(parts.join(" · "), unplaced > 0);
+  load(state.index);
 };
 
 document.addEventListener("keydown", e => {

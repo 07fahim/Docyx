@@ -42,6 +42,20 @@ def _walk(page: Page):
         stack.extend(element.children)
 
 
+def _walk_json(page: Dict[str, Any]):
+    """`_walk` over an exported page, which is plain dicts."""
+    stack = list(page.get("elements") or []) + list(page.get("diagnostic_elements") or [])
+    while stack:
+        element = stack.pop()
+        yield element
+        stack.extend(element.get("children") or [])
+
+
+def _same_box(a: Dict[str, float], b: Dict[str, float]) -> bool:
+    # Tolerant, because these are floats that travelled through JSON.
+    return all(abs(a[k] - b[k]) < 1e-6 for k in ("x", "y", "width", "height"))
+
+
 def _snapshot(element: Element) -> Dict[str, Any]:
     """Everything an edit can touch, deep-copied.
 
@@ -169,6 +183,84 @@ class Workspace:
         )
         return path
 
+    # --- resume ----------------------------------------------------------
+
+    def restore(self, source: Optional[str] = None) -> Dict[str, Any]:
+        """Reattach edits from a previous export, verifying each one first.
+
+        Ids are positional, so they survive everything the runtime varies and
+        nothing the extraction code does — `scripts/measure_id_stability.py`
+        measured one past change orphaning 83% of a page's ids while 29 more
+        *survived naming different content*. Matching on id alone would move a
+        human correction onto a line that had changed underneath it, silently.
+
+        So the check is `original_*` against what the extractor says **now**:
+        that is the machine's own claim at the time of the edit, and if it
+        still holds the edit still applies. Three outcomes, and only the first
+        one writes anything.
+        """
+        path = Path(source) if source else Path(self.pdf_path).with_suffix(".docyx.json")
+        if not path.exists():
+            raise KeyError(f"no saved edits at {path}")
+
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        report: Dict[str, Any] = {"source": str(path), "applied": 0,
+                                  "unchanged": 0, "conflicts": [], "orphans": []}
+
+        for page in saved.get("pages") or []:
+            index = page["page_number"] - 1
+            if index >= self.page_count:
+                continue
+            for saved_element in _walk_json(page):
+                provenance = saved_element.get("provenance") or {}
+                if not provenance.get("modified_by_user"):
+                    continue
+                self._reattach(index, saved_element, provenance, report)
+        return report
+
+    def _reattach(self, index, saved_element, provenance, report) -> None:
+        element_id = saved_element["id"]
+        try:
+            target = self.find(index, element_id)
+        except KeyError:
+            report["orphans"].append({"page": index, "id": element_id})
+            return
+
+        was_text = provenance.get("original_text")
+        was_box = (provenance.get("original_geometry") or {}).get("bbox")
+
+        # Already carrying this exact edit. Without this, importing the same
+        # file twice reports every edit as a conflict — the target no longer
+        # matches its own `original_text`, because it is the correction.
+        if (target.provenance.modified_by_user
+                and target.provenance.original_text == was_text
+                and (target.text or "") == (saved_element.get("text") or "")
+                and _same_box(saved_element["geometry"]["bbox"],
+                              target.geometry.bbox.model_dump())):
+            report["unchanged"] += 1
+            return
+
+        if was_text is not None and (target.text or "") != was_text:
+            report["conflicts"].append({
+                "page": index, "id": element_id, "field": "text",
+                "then": was_text, "now": target.text,
+            })
+            return
+        if was_box is not None and not _same_box(was_box, target.geometry.bbox.model_dump()):
+            report["conflicts"].append({
+                "page": index, "id": element_id, "field": "geometry",
+                "then": was_box, "now": target.geometry.bbox.model_dump(),
+            })
+            return
+
+        # Through `move`/`edit`, so restored edits land on the undo stack and
+        # re-record their originals from values just proven identical.
+        if was_box is not None:
+            self.move(index, element_id, BoundingBox(**saved_element["geometry"]["bbox"]))
+        if was_text is not None:
+            self.edit(index, element_id, saved_element.get("text") or "")
+        report["applied"] += 1
+
     def close(self) -> None:
         self.renderer.close()
 
@@ -227,7 +319,8 @@ def _handler(workspace: Workspace):
 
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's API
             url = urlparse(self.path)
-            routes = ("/api/edit", "/api/move", "/api/undo", "/api/redo", "/api/export")
+            routes = ("/api/edit", "/api/move", "/api/undo", "/api/redo",
+                      "/api/export", "/api/import")
             if url.path not in routes:
                 self._send(404, b"not found", "text/plain")
                 return
@@ -248,6 +341,10 @@ def _handler(workspace: Workspace):
                     path = workspace.export(body.get("path"))
                     self._send(200, json.dumps({"path": str(path)}).encode(),
                                "application/json")
+                elif url.path == "/api/import":
+                    report = workspace.restore(body.get("path"))
+                    report["history"] = workspace.history(index)
+                    self._send(200, json.dumps(report).encode(), "application/json")
                 elif url.path == "/api/undo":
                     self._element(workspace.undo(index), index)
                 elif url.path == "/api/redo":

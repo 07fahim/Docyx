@@ -401,7 +401,22 @@ So a same-version round trip is safe, and so is an edit made in the viewer reatt
 
 The span-to-line granularity change **orphaned 83% of one page's ids**, and — worse — 29 ids *survived while naming different content*. One of those is traceable to the "blank spans must not be skipped" fix: `page1_b16_l0_s1` went from `Equal contribution.Listing order` to `Equal contribution. Listing order`. A resume keyed on id alone would have silently reattached a human correction to text that had changed underneath it.
 
-**So resume needs a content fingerprint beside the id, not the id alone** — the same checksum discipline `.corpus/truth/` already uses, with three outcomes: hash matches → reattach; id present but hash differs → flag, never auto-apply; id absent → report orphaned. Run `--against` before shipping any extraction change to see how much it would orphan.
+**So resume verifies content, not the id alone** — `POST /api/import` → `Workspace.restore()`, and the export *is* the save file, so there is no second format to drift.
+
+**The check is `original_text` / `original_geometry` against what the extractor says now.** Those record the machine's own claim at the moment of the edit; if it still holds, the edit still applies. Comparing the *corrected* text would be useless — it differs by construction. Four outcomes, and only the first writes anything:
+
+| | |
+|---|---|
+| original matches | reattach, through `edit`/`move`, so the import is undoable |
+| already carrying this exact edit | `unchanged` — without it, importing twice reports every edit as a conflict, because the target no longer matches its own `original_text` |
+| original differs | `EDIT_CONFLICT`, never auto-applied |
+| id gone | `EDIT_ORPHANED` |
+
+Conflicts and orphans render as page issues beside the gate warnings, naming both values. An import that silently dropped what it could not place would be worse than no import: the edits are gone and nothing says so.
+
+Only `modified_by_user` elements are carried over. Re-applying every element would rewrite the page from a stale file.
+
+Run `--against` before shipping any extraction change to see how much it would orphan.
 
 No revert button, deliberately: `original_text` makes one trivial, but re-applying it through `edit_text()` lands in exactly the state undo exists to avoid. Undo is the revert.
 
