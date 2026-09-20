@@ -54,7 +54,27 @@ Every analyzer takes an optional `detector` and falls back to a stub returning `
 | `VisualAnalyzer` | `List[VisualDetection]` (bbox, kind, score) | `geometry_inference` |
 | `OCRAnalyzer` | `List[OCRLine]` (bbox, text, score) | `ocr` |
 
-`VisualAnalyzer` is the exception: its fallback is a **real OpenCV heuristic**, not an empty stub. It finds `rule` and `figure` elements via morphology. A rule must be both long (`min_rule_ratio`) and thin (`max_rule_thickness`) — without the thinness bound a solid filled block survives the directional opening and is misreported as a rule, suppressing the figure underneath it. Those constructor knobs are the tuning surface.
+`VisualAnalyzer` is the exception: its fallback is a **real OpenCV heuristic**, not an empty stub. It finds `rule` and `figure` elements via morphology. **A `rule` is the typographic sense — a printed line: a table border, a heading underline, a separator.** A rule must be both long (`min_rule_ratio`) and thin (`max_rule_thickness`) — without the thinness bound a solid filled block survives the directional opening and is misreported as a rule, suppressing the figure underneath it. Those constructor knobs are the tuning surface.
+
+**`max_component_density` was a Latin-only discriminator, and it was the third threshold in this repo measured on English and broken everywhere else.** Its premise — text shatters into one connected component per glyph — describes an alphabet with separated letters, not writing. Components per 10k pixels over real text lines:
+
+| page | script | median |
+|---|---|---|
+| `arxiv_attention` p2 | latin | 62.3 |
+| `rfc2616` p12 | latin | 43.1 |
+| `wiki_bn` p30 | bengali | **10.5** |
+| `wiki_ar` p6 | arabic | **0.0** |
+
+against a threshold of 20 and a code comment claiming "figures sit near 10". Bengali joins its letters under the matra and Arabic is cursive, so a word is one component rather than six — **whole paragraphs of Bengali were reported as figures, and `wiki_bn` p30 drew 8 of them over 5 paragraphs.** Latin never showed it.
+
+`reject_text_figures` overrules the pixels with something script-independent and already known: **a region tiled by extracted text lines is text.** It runs in the pipeline, not the analyzer, because the analyzer takes only image bytes — it must work on a gate-failed page, and there are no lines there for it to use.
+
+Rules got the same treatment, because a strong straight edge *inside a photograph* is image content: the lit facade of a building at night, a horizon, the image's own frame. `wiki_bn` p30 reported five. Two sources suppress them, and the second is the reliable one:
+
+- **Detected figures, but only picture-like ones.** Measured text coverage separates them cleanly: real pictures 0.04 / 0.06 / 0.08, a photo group including its caption 0.34, `nasa_budget` p88's ruled table caught as a figure 0.43, actual text blocks 0.65–0.88. `PICTURE_TEXT` 0.15. **Letting a text-bearing figure suppress deleted that table's own bottom border** — trading a false rule for a missing one, which is the worse defect.
+- **The rasters the file itself declares** (`PDFRenderer.image_rects`). The heuristic alone left one rule behind on `wiki_bn` p30 — a horizon in a photo whose sky is white, so there was too little ink to contour. A raster covering ≥80% of the page is skipped: that is a scan, and a scanned form's ruled borders are real rules.
+
+Result: `wiki_bn` p30 goes from 6 rules and 8 figures to **0 and 3**, `wiki_bn` p5 from 10 and 3 to 0 and 1, while `arxiv_attention` p0 keeps both its real rules and `nasa_budget` p88 keeps both of its.
 
 **The output states its own coordinate system.** `Page.coordinate_system` carries `{origin, units, reference_resolution}` (§4). The invariant was enforced at every boundary and documented here, but never emitted — a consumer reading the JSON had to already know that `x: 236.29` meant 150-DPI top-left pixels, or guess. It is a field rather than a convention so that rendering at another DPI becomes a value change instead of a silent reinterpretation of every box ever exported.
 
@@ -641,7 +661,7 @@ So `analysis/headings.py` plus the manual control cover the same ground at a fra
 
 - **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **Three** real scans are graded against hand-typed references, across three producers and two scripts (CER 0.073 / 0.052 Bengali, 0.252 Latin — see above), and the corpus behind them now holds **1877 scanned pages from 10 producers** rather than 8. The binding limit is no longer documents, it is **references**: a page is only gradeable once a human types it, so three is what one transcriber produced. `fetch_scans.py` grows the pool; transcription is what turns a page into evidence. Skew and show-through are now represented in the corpus but not yet in any graded page.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative. Tables additionally have a model-free path (**Tables with no model**); layout does not, and the measured failure of `DocLayNetDetector` on captions says a model is not obviously the answer there either.
-- `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
+- `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter rejects candidates that fragment like text. **That filter is Latin-only and it put Bengali and Arabic prose exactly where figures live** — see below. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is unused, and the obvious producer was measured and declined — see below.
 
 ### Typography from pixels was measured and declined

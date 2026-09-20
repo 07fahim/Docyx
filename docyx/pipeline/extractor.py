@@ -6,7 +6,7 @@ from docyx.analysis.ocr import OCRAnalyzer
 from docyx.analysis.reading_order import TEXT_ROLES, ReadingOrderCalculator
 from docyx.analysis.table_geometry import find_tables
 from docyx.analysis.tables import TableAnalyzer
-from docyx.analysis.visual import VisualAnalyzer
+from docyx.analysis.visual import VisualAnalyzer, reject_text_figures
 from docyx.core.metadata import ProvenanceSource
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pdf.text_extractor import NativeTextExtractor
@@ -149,6 +149,13 @@ class DocyxPipeline:
                 warnings.append(warning)
 
         width, height = renderer.page_size(page_num)
+        # Where the file says its pictures are — see reject_text_figures.
+        # Guarded: a malformed image dictionary is a cosmetic loss here and
+        # must not cost the page its text.
+        try:
+            image_rects = renderer.image_rects(page_num)
+        except Exception:  # noqa: BLE001
+            image_rects = []
 
         if not gate_result.passed:
             source_type = "scanned" if renderer.has_images(page_num) else "empty"
@@ -183,7 +190,7 @@ class DocyxPipeline:
                             ),
                         )
                     ],
-                    elements=_assemble(recognised, detected),
+                    elements=_assemble(recognised, detected, image_rects),
                 )
 
             return Page(
@@ -244,7 +251,7 @@ class DocyxPipeline:
                             ),
                         )
                     ],
-                    elements=_assemble(repaired, detected),
+                    elements=_assemble(repaired, detected, image_rects),
                     # Nothing is discarded: the native text is still exact.
                     diagnostic_elements=native,
                 )
@@ -262,7 +269,7 @@ class DocyxPipeline:
             if warning:
                 warnings.append(warning)
 
-        elements = _assemble(native, detected)
+        elements = _assemble(native, detected, image_rects)
         return Page(
             page_number=page_num + 1,
             # Text came through, but a detector dropped out — the page is usable
@@ -306,7 +313,8 @@ def _safely(
         return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))
 
 
-def _assemble(text: List[Element], detected: List[Element]) -> List[Element]:
+def _assemble(text: List[Element], detected: List[Element],
+              images: Optional[List[tuple]] = None) -> List[Element]:
     """Enrich text with the detections, order it, and fill table cells.
 
     One path for every source of text. The OCR branches used to call only the
@@ -314,6 +322,11 @@ def _assemble(text: List[Element], detected: List[Element]) -> List[Element]:
     nothing, no alignment, and table cells with null text — while the same
     flags on a born-digital page populated all three.
     """
+    # Before anything reads them: a figure box over a paragraph would be given
+    # a role, ordered, and drawn over the page as if it were a picture. The
+    # pixel heuristic cannot tell Bengali or Arabic prose from a photograph —
+    # see `reject_text_figures` — and the extracted lines can.
+    detected = reject_text_figures(detected, text, images)
     _assign_roles(text, detected)
     _assign_alignment(text, detected)
     elements = ReadingOrderCalculator.calculate(text + detected)

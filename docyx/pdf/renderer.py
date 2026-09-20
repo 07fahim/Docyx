@@ -73,6 +73,28 @@ class PDFRenderer:
         """Built here so the fitz document never leaves this package."""
         return NativeTextExtractor(self.doc)
 
+    def image_rects(self, page_num: int) -> list:
+        """Where the page declares its raster images, in 150 DPI pixels.
+
+        Ground truth, unlike the figure heuristic: the file says where its
+        pictures are. Used to suppress "rules" that are really a strong edge
+        inside a photograph — a lit facade, a horizon, the image's own frame.
+
+        A raster covering nearly the whole page is a scan rather than a figure,
+        and a scanned form's ruled table borders are real rules, so those are
+        excluded. Returns plain tuples: `fitz.Rect` must not leave this package.
+        """
+        page = self.doc[page_num]
+        page_area = abs(page.rect.width * page.rect.height) or 1.0
+        out = []
+        for info in page.get_images(full=True):
+            for rect in page.get_image_rects(info[0]):
+                if abs(rect.width * rect.height) / page_area >= 0.8:
+                    continue
+                out.append((rect.x0 * SCALE, rect.y0 * SCALE,
+                            rect.x1 * SCALE, rect.y1 * SCALE))
+        return out
+
     def has_images(self, page_num: int) -> bool:
         """Does the page carry raster content? Distinguishes a scan from a
         genuinely blank page, both of which fail the text-layer gate."""
