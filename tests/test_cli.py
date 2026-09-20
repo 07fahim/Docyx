@@ -253,3 +253,31 @@ def test_a_percentage_is_refused_where_a_probability_belongs():
 
     with pytest.raises(argparse.ArgumentTypeError):
         ocr_confidence("abc")
+
+
+def test_a_missing_output_directory_is_created_not_a_traceback(tmp_path):
+    """Batch mode already creates its output directory, so a single file whose
+    parent is missing must not be the one path that raises a bare
+    FileNotFoundError out of write_text()."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "hello", fontsize=11)
+    source = tmp_path / "in.pdf"
+    doc.save(str(source))
+    doc.close()
+
+    target = tmp_path / "does" / "not" / "exist" / "out.json"
+    assert main([str(source), "-o", str(target)]) == 0
+    assert target.exists()
+
+
+def test_every_tree_format_creates_its_parent_too(tmp_path):
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "hello", fontsize=11)
+    source = tmp_path / "in.pdf"
+    doc.save(str(source))
+    doc.close()
+
+    for fmt in ("bundle", "blocks"):
+        target = tmp_path / fmt / "nested" / "out"
+        assert main([str(source), "-f", fmt, "-o", str(target)]) == 0
+        assert any(target.iterdir())

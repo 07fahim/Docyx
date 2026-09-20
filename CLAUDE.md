@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (318 tests, ~40s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (320 tests, ~41s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -384,6 +384,7 @@ Four rules, none of them negotiable:
 | `--ocr scan.pdf` | *"the following arguments are required: pdfs"* — blames the argument you did supply | "looks like a file, not a language code" |
 | `--ocr-min-confidence 50` | `1 failed [NO_TEXT_LAYER]` — reads as a percentage, drops every line | "this is a probability, not a percentage" |
 | `--port 8000` when taken | **hung silently** while the first server kept answering | "port 8000 is already serving" |
+| `-o a/b/c.json` (no `a/b`) | bare `FileNotFoundError` out of `write_text()` | creates it, as batch mode already did |
 
 The last one is the sharpest: `ThreadingHTTPServer` sets `SO_REUSEADDR`, which **on Windows lets the second bind succeed**. The second process then sat in `serve_forever` answering nothing while the first kept the connections — so starting the workspace twice looked like it worked and showed the other document. `_port_is_taken` connects rather than binds, because a socket merely in `TIME_WAIT` does not accept and an immediate restart must keep working.
 

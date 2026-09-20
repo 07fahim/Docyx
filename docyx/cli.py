@@ -199,6 +199,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # IsADirectoryError traceback from write_text() outside the try block.
     if not many and args.format not in TREE_FORMATS and args.output and args.output.is_dir():
         parser.error(f"{args.output} is a directory; give a file path, or use -f bundle")
+    # Batch mode already creates its output directory, so a single file whose
+    # parent is missing should not be the one path that raises a bare
+    # FileNotFoundError from write_text() instead.
+    if args.output and args.output.parent and not args.output.parent.exists():
+        try:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            parser.error(f"could not create {args.output.parent}: {exc}")
 
     if args.ocr_repair and not args.ocr:
         parser.error("--ocr-repair needs --ocr LANG to say which language to recognise")
