@@ -109,6 +109,7 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/sample_table_detections.py draw 40
 PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
+PYTHONPATH=. .venv/Scripts/python.exe scripts/find_scanned_pages.py          # real scans on disk, by producer
 ```
 
 **What the harness does and does not establish** (audited; read before quoting a number):
@@ -357,16 +358,22 @@ On `arxiv_gpt3` p7 it scores **1.000 with all 72 cells**, where the model gets 6
 
 The bar was set at 0.95 *before* adjudication, and **the lower bound decides**, not the point estimate: 20 clean samples read 1.000 with a bound near 0.84.
 
-| | precision | 95% CI | detections |
-|---|---|---|---|
-| first measurement | 0.650 | [0.495, 0.779] | 500 |
-| after stripping page furniture | **0.850** | **[0.709, 0.929]** | 434 |
+| draw | seed | precision | 95% CI | detections |
+|---|---|---|---|---|
+| before the furniture fix | 20260920 | 0.650 | [0.495, 0.779] | 500 |
+| after | 777 | 0.850 | [0.709, 0.929] | 434 |
+| after | 31415 | **0.700** | [0.546, 0.819] | 434 |
+| **after, both draws pooled** | | **0.766** | **[0.660, 0.847]** | 434 |
 
-**Both rows are independent random draws** (seeds 20260920 and 777), so the second is a measurement rather than a re-check of the pages the fix targeted. Worksheets for both are kept in `.corpus/truth/table_regions/`.
+**Every row is an independent random draw**, so row 2 measures the fix rather than re-checking the pages it targeted. Worksheets for all three are kept in `.corpus/truth/table_regions/`.
 
 The first draw's 14 false positives fell into six families, **none of which appeared in the nine adversarial pages** — the discovery curve had not flattened, it had barely started. Five of the fourteen began with a running head (`RFC 2616 | HTTP/1.1 | June, 1999`), one root cause worth fixing: three short aligned cells at the top of every page are a perfect false anchor, establishing three columns and then pulling the prose beneath into the box. `_strip_furniture` removes it, which is correct regardless of detection — a running head belongs to no table.
 
-**0.709 still does not clear 0.95, so tables stay off by default.** The six survivors are one each of: infobox across the gutter, prose plus a numbered list, a code list, an acronym glossary, an example figure, RFC prose. No dominant family remains, which is the signal to stop: further gains would come from tuning against 40 adjudicated samples, and that overfits.
+**The third draw is the reason to quote the pooled row and not row 2.** Seeds 777 and 31415 sample the same 434 detections and read 0.850 and 0.700 — a 0.15 spread from sampling alone. Reporting the first of those as "the measurement after the fix" would have overstated it by more than the fix itself was worth. **n=40 is too small to quote singly**; pooled over 77 distinct detections the interval finally narrows to ±0.09.
+
+**0.660 does not clear 0.95, so tables stay off by default**, and the gap is wider than one draw suggested. The surviving families, pooled: **indexes** (3), **acronym glossaries** (3), **prose mistaken for columns** (3), **bibliographies** (2), **form instruction prose** (2), plus one each of infobox-across-the-gutter, code list, example figure and RFC front matter. Indexes and glossaries are now the two largest, and they share a shape — an unruled two-column term/definition list is geometrically indistinguishable from a table, which is the point at which geometry alone has run out.
+
+**Adjudication is checked against itself.** Three detections were drawn by both seeds, and both rounds labelled all three identically — so the verdicts track a rule rather than the result. Each draw's worksheet records the rule and names the calls a second adjudicator could reasonably flip; the four decided by looking at the rendered page rather than the cell text are named too, because "I read the cells" and "I looked at the page" are not the same evidence.
 
 **3 tables is an instrument, not a benchmark**, and one of the three is deliberately the hardest page in the corpus. The metric itself is unit-tested without weights in [tests/test_table_transformer.py](tests/test_table_transformer.py) — a scorer nobody can check is worth no more than the score it prints.
 
@@ -477,6 +484,25 @@ The real misses are small and specific: `Particulars` read as `15` (a table head
 
 **The honest caveat on the reference:** it was transcribed from the rendered page and cross-checked at 1.8× on three crops. That is what a human annotator does, but it is one transcriber and one page, so treat it as a first real data point rather than a benchmark. The truth file carries the PDF's `sha256` and the harness refuses to score a different file.
 
+#### A second real scan, and what it proved about the metric
+
+`scripts/find_scanned_pages.py` inventories every genuinely scanned page in the corpora — the gate decides, `has_images` decides `scanned` vs `empty`, so it cannot drift from the pipeline's own derivation, and nothing is rasterised. It found a second gradeable scan: **`.corpus/real/oct222013smespdl02_mou.pdf` p13**, a JICA/Bangladesh Bank MOU signature page, producer `Adobe Acrobat Pro 2020` — a different scanner pipeline from `81_Annexure-1.pdf`'s `SECnvtToPDF`, and Latin rather than Bengali, so it measures the pipeline rather than the script.
+
+| | |
+|---|---|
+| character overlap | **0.988** |
+| CER | 0.340 |
+| sequence similarity | 0.677 |
+| mean confidence | 0.813 |
+
+**Recognition is essentially perfect and the CER is 0.340 anyway.** Every one of those "errors" is reading order: the page is a two-column signature block whose four pairs interleave by `y`, so a column-wise reference and a row-wise recogniser agree on every character and disagree on where each belongs. This is the same float/column problem the reading-order harness measures, arriving inside the OCR score.
+
+**And the harness did not say so.** The reordering diagnosis existed only on the flattened-page path; the `--truth` path — the one grading a real scanner, the only evidence here that is not a ceiling — printed a 0.31 gap between the two metrics with nothing saying which to believe, while CLAUDE.md claimed it diagnosed exactly that. `diagnose()` is now one function called from both, and it distinguishes the two causes: against a native reference the gap usually means visual order, and against a hand-typed one it cannot, so it points at the truth file's `caveat` instead.
+
+**`source_type: scanned` over-reports, and the inventory is what showed it.** Of 8 pages so classified across 1748, **6 are designed cover art** — NASA's FY2025 cover, two Saudi Ministry of Finance covers, an MCI back cover with a QR code. All satisfy the derivation exactly: no text layer, raster content present. The derivation is not wrong, but the name invites a consumer to route `scanned` pages to OCR, and on this corpus that OCRs six covers for every two real scans. Only `81_Annexure-1.pdf` p0 and `oct222013smespdl02_mou.pdf` p13 are scanned *text*.
+
+The same sweep counts what `--ocr-repair` exists for: **67 pages carrying `RTL_VISUAL_ORDER` and 32 carrying `COMBINING_MARK_ORDER`** — far more than the scans, which is the measured form of the claim that this is a born-digital feature rather than a scanning one.
+
 #### `--ocr-repair`
 
 The finding above is wired up, behind its own flag:
@@ -548,6 +574,12 @@ raster content present), `empty` (neither), `unknown` (page unreadable). It sat 
 a hardcoded `born_digital` for three phases, which made it wrong on precisely the
 pages it exists to mark.
 
+**`scanned` means "no text layer, raster content present" and nothing more.** A
+designed cover page satisfies that exactly, and measured across the corpora
+*three quarters of the pages carrying it are cover art rather than scans* — see
+**A second real scan** above. Do not read it as "route this to OCR"; read it as
+"this page's content is in its pixels", which is all the derivation can know.
+
 **A zero-page PDF is rejected too**, in the same place. One of the real Arabic reports is a valid, unencrypted 14 MB `PDF 1.6` whose page tree resolves to nothing. Left alone, `process()` returned a `Document` with zero pages and no error, and the CLI exited **0** — because "every page produced a valid result" is vacuously true of no pages. A 14 MB file that produced nothing was being reported as a success.
 
 **A document that forbids copying is reported, not obeyed and not ignored.** An owner password sets a permission bitfield excluding text extraction — and it is a claim the file makes rather than a lock it enforces, since the file opens without a password and essentially every tool ignores it. Docyx extracts it and emits `EXTRACTION_NOT_PERMITTED`, which is the same contract it applies to a text layer that lies: say what the document claims, let the human decide. Silent on ordinary files, which all report `copy_allowed`.
@@ -577,7 +609,7 @@ So `analysis/headings.py` plus the manual control cover the same ground at a fra
 
 ### Known gaps
 
-- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **One** real scan is now measured (CER 0.075, see above) — one page, one producer, one transcriber. Everything else is flattened born-digital, so skew and show-through remain largely unrepresented.
+- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **Two** real scans are now measured, across two producers and two scripts (CER 0.075 Bengali, character overlap 0.988 Latin — see above). `find_scanned_pages.py` says there is no third on disk: 1748 pages yield 8 classified `scanned` and 6 of those are cover art. Everything else is flattened born-digital, so skew and show-through remain largely unrepresented, and **growing this needs new documents rather than a new script**.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative. Tables additionally have a model-free path (**Tables with no model**); layout does not, and the measured failure of `DocLayNetDetector` on captions says a model is not obviously the answer there either.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is unused, and the obvious producer was measured and declined — see below.

@@ -152,17 +152,40 @@ def main(pdf_path: str, page_num: int, lang: str) -> int:
     print()
     print("  native :", normalise(native)[:160])
     print("  ocr    :", normalise(recognised)[:160])
+    diagnose(overlap, ratio, confidences, reference_is_native=True)
+    return 0
+
+
+def diagnose(overlap, ratio, confidences, reference_is_native: bool) -> None:
+    """Say whether a low sequence score is misrecognition or misordering.
+
+    Called from BOTH measurement paths. It lived only in the flattened-page
+    path, so the `--truth` run -- the one that grades a real scanner, and the
+    only evidence in this repo that is not a ceiling -- printed a 0.31 gap
+    between the two metrics with nothing saying which one to believe. The
+    `oct222013smespdl02_mou.pdf` p13 signature block reads CER 0.340 against
+    overlap 0.988: recognition is essentially perfect and the whole "error" is
+    two-column reading order.
+    """
     if overlap - ratio > 0.3:
-        print(
-            "\n  The characters agree but their ORDER does not. On an RTL page that\n"
-            "  usually means the native layer is in visual order (check the page's\n"
-            "  RTL_VISUAL_ORDER warning) and OCR recovered logical order — i.e. the\n"
-            "  reference is wrong, not the recogniser."
-        )
+        print("\n  The characters agree but their ORDER does not — recognition is "
+              "fine.\n  This is a reading-order difference, not a recognition "
+              "failure.")
+        if reference_is_native:
+            print("  On an RTL page it usually means the NATIVE layer is in visual "
+                  "order\n  (check the page's RTL_VISUAL_ORDER warning) and OCR "
+                  "recovered logical\n  order — i.e. the reference is wrong, not the "
+                  "recogniser.")
+        else:
+            # A hand-typed reference cannot be in visual order, so the
+            # remaining sources are a multi-column page and the transcriber's
+            # own choice of order -- which the truth file's `caveat` records.
+            print("  The reference was typed by hand, so visual order is not the "
+                  "cause:\n  read the truth file's `caveat`, and quote character "
+                  "overlap here.")
     elif confidences and sum(confidences) / len(confidences) > 0.8 and overlap < 0.8:
         # The dangerous case: confident about characters that are not there.
         print("\n  WARNING: high confidence, low overlap — the engine is confidently wrong")
-    return 0
 
 
 def cer(reference: str, hypothesis: str) -> float:
@@ -230,6 +253,7 @@ def against_truth(pdf_path: str, page_num: int, lang: str, truth_path: str) -> i
     print(f"  excludes: {truth.get('excludes', '')}")
     print("\n  typed:", reference[:150])
     print("  ocr  :", recognised[:150])
+    diagnose(overlap, ratio, confidences, reference_is_native=False)
     return 0
 
 

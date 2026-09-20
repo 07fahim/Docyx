@@ -1,0 +1,30 @@
+{
+  "source": ".corpus/real/oct222013smespdl02_mou.pdf",
+  "sha256": "68241ffdbbc564ff65812b30f94c23c0b05a49141e3d61a3bcfdcfd3fb02dd87",
+  "page": 13,
+  "lang": "eng",
+  "script": "latin",
+  "transcribed_by": "hand, from the 150 DPI render, cross-checked at 1.8x on three crops (header, left column, right column)",
+  "excludes": "four handwritten signatures and the rule beneath each, which are not text",
+  "caveat": "A signature block is genuinely two columns, and the four pairs interleave by y: 'For and on behalf of JICA' and '... of BB' sit on the same line. Transcribed column-wise, left then right, which is how a signature block is read -- but a row-wise reading is defensible, so quote character overlap alongside sequence similarity. This page is the counterpart to real_81_annexure.p0: a real scan, a different producer (Adobe Acrobat Pro 2020 rather than SECnvtToPDF), and Latin rather than Bengali, so it measures the scanner pipeline rather than the script.",
+  "lines": [
+    "AS WITNESS the hands of the authorized representatives of the Parties",
+    "hereto as of the day, month and year first before written.",
+    "For and on behalf of JICA",
+    "Mr. Hiroyuki Tomita",
+    "Senior Representative",
+    "For and on behalf of PWD",
+    "Mr. Kabir Ahmed Bhuiyan",
+    "Chief Engineer",
+    "For and on behalf of BB",
+    "Mr. Sukamal Sinha Choudhury",
+    "General Manager & Project Director",
+    "For and on behalf of BGMEA",
+    "Mr. Md. Shahidullah Azim",
+    "Vice President",
+    "For and on behalf of BKMEA",
+    "Mr. A. H. Aslam Sunny",
+    "Second Vice President",
+    "14"
+  ]
+}
