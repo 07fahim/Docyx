@@ -137,8 +137,39 @@ issues, **three of them regressions that 219 passing tests missed** — includin
 `--layout` taking a page from 3 headings to zero — because no test rendered the
 output the way a user sees it.
 
-Missing: the return arrow (JSON to page) and editing. The schema is ready —
-`edit_text()`, `modified_by_user`, `original_text`, `source: manual`.
+**Second slice shipped** (`a57f469`, `f096445`): the viewer was rebuilt around
+the trust question and the selection loop now closes both ways.
+
+| criterion | state |
+|---|---|
+| 1. Two-panel UI, synchronized selection | **Done** — reading-order outline drives the page, the page drives the outline |
+| 2. Interactive bbox editing + inspection | **half** — inspection done, no editing |
+| 3. Per-page undo/redo | not started |
+| 4. Edited JSON validates and exports, errors block | not started |
+| 5. Headless CLI batch | Done (shipped in phase 4) |
+
+The outline lists the page in reading order, so **the list is the ordering
+claim itself** — a wrong order reads as prose that stops making sense, the
+same signal `export/markdown.py` is kept around to provide. Top-level
+elements only: the first version flattened children and buried 10 lines
+under 56 `text_span` fragments, which is the mistake reading order avoids
+by refusing to number a table alongside the text inside it.
+
+Design tokens came from Linear's public analysis on getdesign.md — the
+ladders only, not the landing-page rhythm. That pass caught a real defect:
+focus rings used the `detected` blue, so a focus ring and a detector's
+claim were the same colour.
+
+**Rendering it caught four regressions no test could**, which is the
+argument for the viewer restated: a font size printed as
+`11.039999961853027pt`, a selection scrim opaque enough to make the rest of
+the page unreadable, a solid green trust bar on a page whose verdict reads
+`PARTIAL`, and light Windows scrollbars on a near-black UI.
+
+Still missing: **editing**. The schema has been ready since phase 4 —
+`edit_text()`, `modified_by_user`, `original_text`, `source: manual` — and
+nothing in the UI calls any of it. The `edited` tier reads 0 in the census
+because no code path can produce one.
 
 ## Decisions settled
 
@@ -150,8 +181,9 @@ Missing: the return arrow (JSON to page) and editing. The schema is ready —
 
 ## Next Steps
 
-1. **Workspace: the return arrow.** JSON to page highlighting, then text
-   editing through `edit_text()`.
+1. **Workspace: editing.** The selection loop is closed; `edit_text()` is
+   still uncalled. This is what turns the viewer into an annotation tool
+   and unblocks (4).
 2. **Annotate reading order first** — it is the only thing with a scorer
    (`measure_reading_order.py`). Decide what happens to truth-file checksums
    before element boundaries become editable, or the 0.976 baseline is lost.
