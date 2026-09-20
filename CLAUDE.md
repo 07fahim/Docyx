@@ -122,7 +122,18 @@ Truth files record a hand-verified order plus a checksum of the line inventory; 
 
 Column order **and band order** respect `direction`: `_is_rtl` takes a majority vote over each block's elements, so an RTL block reads its columns right to left and a mixed page resolves per block. Banding ignored it until measured — that reversed every multi-element RTL row and put `wiki_ar.pdf` p6 *below* the naive baseline.
 
-**`script`, not `language` (§7).** The spec asks for `language`; a PDF carries none, so `"en"` could only come from statistical detection — a guess, which cannot sit in a schema where every value declares its own reliability. Script *is* in the characters: Unicode names U+0995 `BENGALI LETTER KA`, so the first word of the codepoint's name is the answer, with no table and no model. It cannot tell English from French and does not pretend to; it tells Bengali from Arabic from Latin, which is what these documents turn on. Verified: `wiki_ar` p6 all `arabic`, `word_bn` p0 all `bengali`, `arxiv_attention` p0 all `latin`.
+**`script`, not `language` (§7).** The spec asks for `language`. The original reasoning was that a PDF carries none, so `"en"` could only come from statistical detection — a guess, which cannot sit in a schema where every value declares its own reliability.
+
+**That premise was imprecise, and the conclusion came out stronger.** Some PDFs *do* declare `/Lang`. Four in the corpus do, and **two are wrong**:
+
+| file | declares | actually |
+|---|---|---|
+| `wiki_ar.pdf` | `ar` | Arabic ✓ |
+| `wiki_bn.pdf` | `bn` | Bengali ✓ |
+| `word_ar.pdf` | `en-US` | **Arabic** |
+| `word_bn.pdf` | `en-US` | **Bengali** |
+
+`/Lang` records the authoring tool's UI locale, not the document's language — and it fails on exactly the Word-produced non-Latin files this project exists for, the same two carrying `COMBINING_MARK_ORDER` and `RTL_VISUAL_ORDER`. So do not read it: a declared-but-wrong value is worse than an absent one, because it looks authoritative. Script is derived from the characters and cannot lie about them. Script *is* in the characters: Unicode names U+0995 `BENGALI LETTER KA`, so the first word of the codepoint's name is the answer, with no table and no model. It cannot tell English from French and does not pretend to; it tells Bengali from Arabic from Latin, which is what these documents turn on. Verified: `wiki_ar` p6 all `arabic`, `word_bn` p0 all `bengali`, `arxiv_attention` p0 all `latin`.
 
 `direction` comes from the line's direction vector (vertical vs horizontal) plus the **Unicode bidi category of the characters**. It deliberately does *not* use the span's `bidi` embedding level: measured on `.corpus/wiki_ar.pdf`, every Arabic span reports `bidi=0`, because the generator baked visual order into the glyph stream and discarded the levels. Trusting it classified all 74 elements on an Arabic page as LTR and left this whole RTL path dead on the documents it exists for.
 
@@ -406,6 +417,18 @@ pages it exists to mark.
 XPS, EPUB, CBZ and Office documents, so `fitz.open()` succeeding is not evidence of
 a PDF — a `.docx` went through the whole pipeline reported as `ok` before this check
 existed.
+
+### The tagged-PDF path was measured and declined
+
+§10 step 1 asks for native PDF structure, and `scripts/measure_struct_tree.py` reports 75.9% of the corpus tagged, 69% with useful tag types. Those are *per file* and they oversell it badly.
+
+**Per page, heading tags cover 6%.** `nasa_budget.pdf` is 807 pages with headings declared on 9 of them; `wiki_bn.pdf` is 65 pages with 18. `wiki_bn` p5 — a page with a perfectly ordinary visible heading — declares **no heading tag at all**.
+
+**The link from a tag to a line is the expensive part.** PyMuPDF exposes no MCID: not on spans, not in `get_texttrace()`, not in `get_bboxlog()`, and there is no structure API. The tree itself is walkable by xref (`/S /H1`, `/Pg`, `/K [0 …]`), but reaching the text under an MCID means tokenising the content stream — `/H1 <</MCID 0>>BDC … EMC` — where strings are CID-encoded (`<00E0> Tj`) and need the font to decode. Correlating marked-content order against MuPDF's span order instead can silently attach a heading type to the wrong line, which is the failure this codebase treats as worse than doing nothing.
+
+**MuPDF's own `get_text("xhtml")` is not a shortcut.** It emits `<h1>`–`<h6>`, but from font heuristics rather than the tree: on `wiki_bn.pdf` p5 it claims seven `<h3>` where the file declares zero, and five of the seven are ordinary paragraphs.
+
+So `analysis/headings.py` plus the manual control cover the same ground at a fraction of the risk. Revisit if a PDF backend appears that exposes MCIDs directly — that one missing accessor is what makes this expensive, not the idea.
 
 ### Known gaps
 

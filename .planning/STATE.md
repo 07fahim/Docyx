@@ -285,7 +285,7 @@ autosave, and that is the next judgement call rather than a defect.
 | OCR | one real scan measured, CER 0.075 (0.037 excluding form leaders), 44/44 Bengali glyphs. Everything else is flattened born-digital |
 | Corpus | 8 labelled pages, 5 documents, ~20 real files, 2 sources |
 | `reading_order` provenance | §10 asks for confidence and provenance; it is a bare int |
-| §10 step 1 | "use native PDF structure" never implemented |
+| §10 step 1 | "use native PDF structure" — **measured and declined**: heading tags cover 6% of pages, and PyMuPDF exposes no MCID to link one to a line. See CLAUDE.md |
 | `schema/v1.6.json` | `description` values edited in place under a published version |
 
 ## Project Reference
