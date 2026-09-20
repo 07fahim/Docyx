@@ -257,6 +257,7 @@
       <button id="export" title="Write the whole document beside the PDF">Export</button>
       <button id="import" title="Reattach edits from a previous export">Import</button>
       <span class="sep"></span>
+      <button id="grouped" title="Outline blocks instead of lines (B)" aria-pressed="true">Blocks</button>
       <button id="suggest" title="Propose heading categories from font size">Suggest</button>
       <button id="labels" title="Label every box (L)" aria-pressed="false">Labels</button>
       <button id="theme" title="Light or dark">&#9680;</button>
@@ -307,7 +308,7 @@ const $ = id => document.getElementById(id);
 const state = {
   index: 0, elements: [], image: null, selected: null, hovered: null,
   scale: 1, hidden: new Set(), rows: [], top: [], history: { undo: 0, redo: 0 },
-  conflicts: [], orphans: [], types: [],
+  conflicts: [], orphans: [], types: [], grouped: true,
   zoom: 1, fit: 1, labels: false,
 };
 
@@ -340,7 +341,9 @@ function draw() {
   state.scale = state.fit * state.zoom;
   $("pct").textContent = `${Math.round(state.scale * 100)}%`;
   $("stats").textContent =
-    `${state.image.width} × ${state.image.height} px · ${shown().length} boxes shown`;
+    `${state.image.width} × ${state.image.height} px · `
+    + (state.grouped ? `${blocks().length} blocks` : `${shown().length} boxes`)
+    + " shown";
   $("zoomFit").disabled = state.zoom === 1;
   const w = Math.round(state.image.width * state.scale);
   const h = Math.round(state.image.height * state.scale);
@@ -368,13 +371,27 @@ function draw() {
     ctx.restore();
   }
 
+  const s = state.scale;
+  if (state.grouped) {
+    for (const g of blocks()) {
+      const [x, y] = [g.x0 * s, g.y0 * s];
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = colourOf(g.weakest) + "aa";
+      ctx.strokeRect(x + .5, y + .5, (g.x1 - g.x0) * s, (g.y1 - g.y0) * s);
+      if (state.labels) tag(g.first, x, y, g.els.length);
+    }
+  }
+
+  // At rest in block view only the selection and the hovered line are drawn,
+  // so the page underneath stays readable.
   for (const el of shown()) {
-    const [x, y, bw, bh] = rect(el);
     const sel = el === state.selected;
+    if (state.grouped && !sel && el !== state.hovered) continue;
+    const [x, y, bw, bh] = rect(el);
     ctx.lineWidth = sel ? 1.5 : 1;
     ctx.strokeStyle = sel ? "#fff" : (el === state.hovered ? "#ffffffaa" : colourOf(el) + "cc");
     ctx.strokeRect(x + .5, y + .5, bw, bh);
-    if (sel || el === state.hovered || (state.labels && state.top.includes(el)))
+    if (sel || el === state.hovered || (!state.grouped && state.labels && state.top.includes(el)))
       tag(el, x, y);
 
     if (sel) {
@@ -395,11 +412,47 @@ function draw() {
   }
 }
 
+/* Boxing every line buries the page it is drawn over: rfc2616 p12 is 52 lines
+   in 17 PyMuPDF blocks, arxiv p2 is 27 in 8. The block is already named in the
+   element id — page13_b10_l0 — so grouping needs no model and no geometry
+   guessing. Blocks are the resting view; a line is outlined only when pointed
+   at or selected, which is when its exact box is what you want. */
+const BLOCK_ID = /^(page\d+_b\d+)_l\d+/;
+const blockKey = el => (BLOCK_ID.exec(el.id) || [null, el.id])[1];
+
+/* Least trustworthy first. A block is only as good as its weakest line, so a
+   paragraph holding one `inferred` line must not read as `exact`. */
+const TIER_RANK = { inferred: 0, detected: 1, exact: 2, edited: 3 };
+
+function blocks() {
+  const groups = new Map();
+  for (const el of shown()) {
+    if (!state.top.includes(el)) continue;
+    const key = blockKey(el), b = el.geometry.bbox;
+    const g = groups.get(key);
+    if (!g) {
+      groups.set(key, { els: [el], x0: b.x, y0: b.y,
+                        x1: b.x + b.width, y1: b.y + b.height });
+    } else {
+      g.els.push(el);
+      g.x0 = Math.min(g.x0, b.x); g.y0 = Math.min(g.y0, b.y);
+      g.x1 = Math.max(g.x1, b.x + b.width); g.y1 = Math.max(g.y1, b.y + b.height);
+    }
+  }
+  for (const g of groups.values()) {
+    g.weakest = g.els.reduce((a, c) =>
+      (TIER_RANK[tier(a)] ?? 9) <= (TIER_RANK[tier(c)] ?? 9) ? a : c);
+    g.first = g.els.reduce((a, c) =>
+      (a.reading_order ?? 1e9) <= (c.reading_order ?? 1e9) ? a : c);
+  }
+  return [...groups.values()];
+}
+
 /* `4. section_header` — the same number the outline shows, so the two panes
-   name the element identically and neither needs a hover to be read. Off by
-   default: 57 tags on a dense page hide the page. */
-function tag(el, x, y) {
-  const label = `${el.reading_order ?? "·"}. ${el.type}`;
+   name the element identically and neither needs a hover to be read. */
+function tag(el, x, y, lines) {
+  const label = `${el.reading_order ?? "·"}. ${el.type}`
+    + (lines > 1 ? `  ${lines} lines` : "");
   ctx.font = "600 10px ui-monospace, Consolas, monospace";
   const w = ctx.measureText(label).width + 8;
   // Above the box, unless that is off the top of the page.
@@ -891,6 +944,12 @@ $("suggest").onclick = async () => {
   $("suggest").disabled = false;
 };
 
+$("grouped").onclick = () => {
+  state.grouped = !state.grouped;
+  $("grouped").setAttribute("aria-pressed", state.grouped);
+  draw();
+};
+
 $("labels").onclick = () => {
   state.labels = !state.labels;
   $("labels").setAttribute("aria-pressed", state.labels);
@@ -933,6 +992,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "-") { zoomStep(-1); return; }
   if (e.key === "0") { setZoom(1); return; }
   if (e.key.toLowerCase() === "l") { $("labels").click(); return; }
+  if (e.key.toLowerCase() === "b") { $("grouped").click(); return; }
   if (e.key === "ArrowLeft" && state.index > 0) load(state.index - 1);
   else if (e.key === "ArrowRight" && !$("next").disabled) load(state.index + 1);
   else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }

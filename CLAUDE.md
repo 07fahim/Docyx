@@ -440,7 +440,11 @@ Selecting an element scrims the page around it rather than tinting it, so the el
 
 **The category is editable**, through a control in the inspector rather than free text: the vocabulary travels with the page (`/api/page` carries `types`), so the viewer cannot offer a type the server would refuse. `Suggest` applies the typography proposals above, one `retype` each, so every one is separately undoable.
 
-**`Labels` (`L`) tags every box `4. section_header`** — the same number the outline shows, so the two panes name an element identically. Off by default because 57 tags hide a dense page, and **top-level only**: tagging a line's own style runs is the same over-listing the outline avoids.
+**`Blocks` (`B`) is the resting view, and it is on by default.** Outlining every line buries the page it is drawn over — `rfc2616` p12 is 52 lines in 17 PyMuPDF blocks, `arxiv_attention` p2 is 27 in 8. **The block is already named in the element id** (`page13_b10_l0`), so grouping needs no layout model and no geometry guessing; it is a regex. At rest only block outlines are drawn, and a line's own box appears when you point at it or select it, which is when its exact edges are what you want.
+
+A block takes the colour of its **weakest** line: a paragraph holding one `inferred` line must not read as `exact`. `Lines` restores per-line boxes for close work.
+
+**`Labels` (`L`) tags each box `4. section_header`** — the same number the outline shows, so the two panes name an element identically. In block view a tag also says how many lines it covers (`16. text  8 lines`), which is 17 tags on that page instead of 52. Off by default, and **top-level only**: tagging a line's own style runs is the same over-listing the outline avoids.
 
 **A light theme** rides the same tokens, with the tier hues *re-tuned rather than replaced* — same four meanings, darkened to hold against white paper instead of near-black. The choice persists in `localStorage`.
 
