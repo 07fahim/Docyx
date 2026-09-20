@@ -142,7 +142,7 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 
 ### The schema is a published contract
 
-`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` (`Page.coordinate_system`, `GridPosition.is_header`). `v1.6` is current — `Element.script`, `Document.filename`/`page_count`, and named typography flags. All additive; none add a guess.
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` (`Page.coordinate_system`, `GridPosition.is_header`). `v1.6` (`Element.script`, `Document.filename`/`page_count`, named typography flags). `v1.7` is current — `Provenance.original_geometry`, which bbox editing needs to be non-destructive. All additive; none add a guess.
 
 `PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
 
@@ -154,7 +154,7 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 - **`original_text` is written on the first edit only.** The obvious implementation overwrites it every time, which destroys the machine's value on the second save. Pinned by `test_editing_twice_keeps_the_ORIGINAL_not_the_first_correction`.
 - **An edited element becomes `exact` / 1.0.** A person reading the rendered page outranks any extractor, and on a damaged text layer they are the only authority available.
 
-Only text keeps its original. Bbox editing (§10) will set `modified_by_user` without preserving the old geometry — add `original_geometry` when something needs to undo across sessions rather than within one.
+`edit_geometry()` (§10) is the twin, added with the workspace's bbox handles, and `original_geometry` is guarded separately from `original_text` — see **Workspace** for why sharing one guard silently loses whichever edit came second.
 
 ### The text-layer gate has two stages
 
@@ -368,7 +368,21 @@ Selecting an element scrims the page around it rather than tinting it, so the el
 - **Only whole lines are editable** — `state.top` in the viewer, i.e. no `text_span` and no `table_cell`. A span is a fragment of its line and a cell of its table, so correcting one would leave the parent's `text` stale and the two would disagree about the page. The server will happily edit a child by id (`_walk` descends, and a test pins that); the restriction is the UI's, and it is the line-granularity rule from §5 applied to writes.
 - **Bbox editing (§10) is still absent**, and needs the `original_geometry` decision before it lands.
 
-Undo/redo (§ phase 5 criterion 3) and export of edited JSON (criterion 4) are not built. `original_text` gives a one-step revert for free, but deliberately has no button: re-applying it through `edit_text()` would leave the line `exact` / 1.0 and `modified_by_user`, which claims a human vouched for text they just rejected.
+**Bbox editing** is `POST /api/move` → `Element.edit_geometry()`, the geometry twin of `edit_text()`. Drag the box to move it, the eight handles to resize. Corners are normalised rather than width/height clamped, so dragging an edge past its opposite flips the box instead of producing a negative size.
+
+`Provenance.original_geometry` is the reason for **schema v1.7**. It is guarded *separately* from `original_text`: the obvious implementation gates both on `modified_by_user`, and then whichever edit came second records nothing — correcting the text of a box you already moved would silently discard the geometry the machine proposed. Pinned by `test_a_text_edit_never_overwrites_a_geometry_original`. The same bug existed in `edit_text` alone and is now fixed: its guard is `original_text is None`, with `or ""` so an element that had no text still records that it had none rather than letting the *second* edit claim the first correction as the original.
+
+**Undo/redo restores a snapshot; it never re-applies an edit in reverse.** `_snapshot` deep-copies text, geometry, confidence and provenance together, because "edit it back" leaves `modified_by_user` set and the element `exact` / 1.0 — claiming a human vouched for a value they just took back. History is **per page**: a global stack would make Ctrl+Z reach into a page the user has already left. An empty history is `409`, a normal state rather than a fault.
+
+**Export** is `POST /api/export` → `<stem>.docyx.json` beside the PDF.
+
+- **Validate, then write.** A file that fails its own schema must not exist, so `Document.model_validate` runs first and a failure is `422` with nothing written. Pydantic does not validate on assignment, so this is a real check rather than a tautology.
+- **"Errors block export" means *schema* errors.** A `failed` page does not block: partial results are the documented contract, and refusing to export 199 good pages over one bad one would invert it.
+- **Every page is exported, not just the visited ones**, so editing page 1 of a 200-page report still costs a full extraction run at export time.
+
+**Edits live in the process.** The per-page cache is the session's working copy; export is the only way out. There is no resume: loading a sidecar back would have to match elements by `id` across a fresh extraction, and nothing guarantees those are stable — the same problem `.corpus/truth/` checksums exist to catch.
+
+No revert button, deliberately: `original_text` makes one trivial, but re-applying it through `edit_text()` lands in exactly the state undo exists to avoid. Undo is the revert.
 
 ## Planning docs
 

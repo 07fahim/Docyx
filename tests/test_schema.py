@@ -68,7 +68,7 @@ def test_page_and_document_serialization():
 
     doc = Document(document_id="doc_123", pages=[page])
 
-    assert doc.schema_version == "1.6"
+    assert doc.schema_version == "1.7"
     assert len(doc.pages) == 1
     assert doc.pages[0].status == PageStatus.OK
     assert len(doc.pages[0].elements) == 1
@@ -76,7 +76,7 @@ def test_page_and_document_serialization():
 
     # Test dict export
     doc_dict = doc.model_dump()
-    assert doc_dict["schema_version"] == "1.6"
+    assert doc_dict["schema_version"] == "1.7"
     assert doc_dict["document_id"] == "doc_123"
     assert "diagnostic_elements" in doc_dict["pages"][0]
     assert doc_dict["pages"][0]["diagnostic_elements"][0]["id"] == "diag_001"
@@ -84,7 +84,7 @@ def test_page_and_document_serialization():
     # Test JSON export
     json_str = doc.model_dump_json()
     data = json.loads(json_str)
-    assert data["schema_version"] == "1.6"
+    assert data["schema_version"] == "1.7"
     assert data["pages"][0]["diagnostic_elements"][0]["id"] == "diag_001"
 
 

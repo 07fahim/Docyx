@@ -1,4 +1,4 @@
-"""The published output schema. See schema/v1.6.json for the generated form."""
+"""The published output schema. See schema/v1.7.json for the generated form."""
 
 import unicodedata
 from enum import Enum
@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, computed_field
 
 from docyx.core.constants import CANONICAL_DPI
-from docyx.core.geometry import Geometry
+from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance
 from docyx.schema.errors import PageIssue
 
@@ -146,10 +146,27 @@ class Element(BaseModel):
     def edit_text(self, text: str) -> "Element":
         """Apply a human correction, preserving the machine's original (§11)."""
         # First edit only: otherwise the second save destroys the original.
-        if not self.provenance.modified_by_user:
-            self.provenance.original_text = self.text
+        if self.provenance.original_text is None:
+            # `or ""` so an element that had no text still records that it had
+            # none: left None, the SECOND edit would claim the first correction
+            # as the machine's original.
+            self.provenance.original_text = self.text or ""
         self.provenance.modified_by_user = True
         self.text = text
+        self.confidence = Confidence(value=1.0, type=ConfidenceType.EXACT)
+        return self
+
+    def edit_geometry(self, bbox: BoundingBox) -> "Element":
+        """Move or resize an element, preserving the machine's original (§10).
+
+        Same contract as `edit_text`, and separately guarded: correcting the
+        text of a box whose position was already fixed must not overwrite the
+        geometry the machine proposed, and vice versa.
+        """
+        if self.provenance.original_geometry is None:
+            self.provenance.original_geometry = self.geometry.model_dump()
+        self.provenance.modified_by_user = True
+        self.geometry = self.geometry.model_copy(update={"bbox": bbox})
         self.confidence = Confidence(value=1.0, type=ConfidenceType.EXACT)
         return self
 
@@ -179,7 +196,7 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.6"
+    schema_version: str = "1.7"
     document_id: str
     filename: Optional[str] = None
     #: The document's own length, which differs from len(pages) when a subset

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Any, Dict, Optional
 from pydantic import BaseModel
 
 
@@ -40,3 +40,6 @@ class Provenance(BaseModel):
     modified_by_user: bool = False
     #: What the machine said, kept so an edit is never destructive.
     original_text: Optional[str] = None
+    #: Where the machine put it, same contract as `original_text`. Typed loosely
+    #: to keep this module free of a geometry import it would otherwise not need.
+    original_geometry: Optional[Dict[str, Any]] = None

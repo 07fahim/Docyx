@@ -143,9 +143,9 @@ the trust question and the selection loop now closes both ways.
 | criterion | state |
 |---|---|
 | 1. Two-panel UI, synchronized selection | **Done** — reading-order outline drives the page, the page drives the outline |
-| 2. Interactive bbox editing + inspection | **half** — text editing and inspection done, bbox editing not started |
-| 3. Per-page undo/redo | not started |
-| 4. Edited JSON validates and exports, errors block | not started |
+| 2. Interactive bbox editing + inspection | **Done** — drag to move, eight handles to resize, via `edit_geometry` |
+| 3. Per-page undo/redo | **Done** — snapshot restore, not reverse-edit |
+| 4. Edited JSON validates and exports, errors block | **Done** — validate then write; schema errors block, a `failed` page does not |
 | 5. Headless CLI batch | Done (shipped in phase 4) |
 
 The outline lists the page in reading order, so **the list is the ordering
@@ -177,10 +177,35 @@ Only whole lines are editable in the UI. A `text_span` is a fragment of its
 line, so correcting one would leave the parent's text stale — the §5
 line-granularity rule applied to writes.
 
-Still missing in phase 5: **bbox editing** (needs the `original_geometry`
-decision), **undo/redo**, and **export**. Edits live in the process and are
-lost when it exits, which is the next thing to fix — annotation that cannot
-be saved cannot expand the corpus.
+**Fourth slice: bbox editing, undo/redo, export — phase 5 criteria 2, 3
+and 4.** Schema **v1.7** adds `Provenance.original_geometry`.
+
+Three bugs the work surfaced, each now pinned:
+
+1. **Sharing one guard loses an edit.** Gating both originals on
+   `modified_by_user` means whichever edit came second records nothing:
+   correcting the text of a box you had already moved silently discarded
+   the geometry the machine proposed. The two are guarded separately now,
+   and `edit_text`'s own guard moved to `original_text is None`.
+2. **`_snapshot`, not reverse-edit.** Undo restores text, geometry,
+   confidence and provenance together. "Edit it back" would leave
+   `modified_by_user` set and the element `exact`/1.0 — claiming a human
+   vouched for a value they took back.
+3. **The 413 never reached the client.** Answering an oversized POST
+   without draining the body resets the connection, so the caller saw a
+   transport error rather than the status. Found by a test that had been
+   passing against the *wrong* server, see below.
+
+**A fixture bug hid state leaking between tests.** `base_url` used a fixed
+port, so only the first `serve` ever bound it and every later test talked
+to the first test's `Workspace`. Invisible while the tests were read-only;
+wrong the moment one of them edits. A port per test now.
+
+Remaining, and stated plainly: **edits live in the process.** Export is the
+only way out — there is no resume, because loading a sidecar back means
+matching elements by `id` across a fresh extraction and nothing guarantees
+those are stable. That is the same problem `.corpus/truth/` checksums exist
+to catch, and it is the real blocker on corpus expansion.
 
 ## Decisions settled
 

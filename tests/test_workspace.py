@@ -5,6 +5,7 @@ JavaScript reads specific fields, and a schema change that drops one would
 otherwise only show up as a blank screen.
 """
 
+import itertools
 import json
 import threading
 import time
@@ -13,6 +14,9 @@ import urllib.request
 import fitz
 import pytest
 
+from pydantic import ValidationError
+
+from docyx.core.geometry import BoundingBox
 from docyx.workspace.server import Workspace, serve
 
 
@@ -27,9 +31,15 @@ def pdf(tmp_path):
     return str(path)
 
 
+#: A port per test. A fixed one meant only the first `serve` ever bound it and
+#: every later test silently talked to the first test's Workspace — harmless
+#: while the tests were read-only, wrong the moment one of them edits.
+_ports = itertools.count(8791)
+
+
 @pytest.fixture
 def base_url(pdf):
-    port = 8791
+    port = next(_ports)
     threading.Thread(
         target=serve, args=(pdf,),
         kwargs={"port": port, "open_browser": False}, daemon=True,
@@ -89,6 +99,7 @@ def test_an_unknown_path_is_a_404(base_url):
 
 
 def post(url, payload):
+    """Mutating routes answer {element, history}."""
     request = urllib.request.Request(
         url, json.dumps(payload).encode("utf-8"),
         {"Content-Type": "application/json"},
@@ -106,7 +117,8 @@ def test_an_edit_records_provenance_rather_than_overwriting_it(base_url):
     """
     before = json.loads(get(f"{base_url}/api/page?page=0"))["page"]["elements"][0]
 
-    after = post(f"{base_url}/api/edit?page=0", {"id": before["id"], "text": "corrected"})
+    after = post(f"{base_url}/api/edit?page=0",
+                 {"id": before["id"], "text": "corrected"})["element"]
 
     assert after["text"] == "corrected"
     assert after["provenance"]["source"] == before["provenance"]["source"] == "native_pdf"
@@ -123,7 +135,8 @@ def test_editing_twice_over_the_wire_keeps_the_original_not_the_first_fix(base_u
     original = json.loads(get(f"{base_url}/api/page?page=1"))["page"]["elements"][0]["text"]
 
     post(f"{base_url}/api/edit?page=1", {"id": element_id, "text": "first"})
-    second = post(f"{base_url}/api/edit?page=1", {"id": element_id, "text": "second"})
+    second = post(f"{base_url}/api/edit?page=1",
+                  {"id": element_id, "text": "second"})["element"]
 
     assert second["provenance"]["original_text"] == original
 
@@ -176,4 +189,143 @@ def test_a_child_element_is_reachable_by_id(tmp_path):
 
     assert edited.text == "changed"
     assert edited.provenance.modified_by_user is True
+    workspace.close()
+
+
+# --- geometry --------------------------------------------------------------
+
+
+def test_moving_an_element_keeps_the_geometry_the_machine_proposed(pdf):
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+    was = element.geometry.bbox.model_dump()
+
+    workspace.move(0, element.id, BoundingBox(x=5, y=6, width=70, height=8))
+
+    assert element.geometry.bbox.model_dump() == {"x": 5, "y": 6, "width": 70, "height": 8}
+    assert element.provenance.original_geometry["bbox"] == was
+    assert element.provenance.modified_by_user is True
+    workspace.close()
+
+
+def test_a_text_edit_never_overwrites_a_geometry_original(pdf):
+    """The two originals are guarded separately. Sharing one `modified_by_user`
+    flag as the guard meant whichever edit came second recorded nothing."""
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+    text_was, box_was = element.text, element.geometry.bbox.model_dump()
+
+    workspace.move(0, element.id, BoundingBox(x=1, y=1, width=1, height=1))
+    workspace.edit(0, element.id, "later")
+
+    assert element.provenance.original_geometry["bbox"] == box_was
+    assert element.provenance.original_text == text_was
+    workspace.close()
+
+
+# --- undo / redo -----------------------------------------------------------
+
+
+def test_undo_restores_provenance_not_just_the_value(base_url):
+    """Undo cannot be "edit it back": that leaves modified_by_user set and the
+    element exact/1.0, claiming a human vouched for a value they took back."""
+    before = json.loads(get(f"{base_url}/api/page?page=0"))["page"]["elements"][0]
+
+    post(f"{base_url}/api/edit?page=0", {"id": before["id"], "text": "wrong"})
+    undone = post(f"{base_url}/api/undo?page=0", {})["element"]
+
+    assert undone["text"] == before["text"]
+    assert undone["provenance"]["modified_by_user"] is False
+    assert "original_text" not in undone["provenance"]
+    assert undone["confidence"] == before["confidence"]
+
+
+def test_redo_reapplies_and_a_new_edit_forks_the_timeline(base_url):
+    element_id = first_element_id(base_url, page=1)
+
+    post(f"{base_url}/api/edit?page=1", {"id": element_id, "text": "one"})
+    post(f"{base_url}/api/undo?page=1", {})
+    redone = post(f"{base_url}/api/redo?page=1", {})
+
+    assert redone["element"]["text"] == "one"
+    assert redone["history"] == {"undo": 1, "redo": 0}
+
+    post(f"{base_url}/api/undo?page=1", {})
+    forked = post(f"{base_url}/api/edit?page=1", {"id": element_id, "text": "other"})
+    assert forked["history"]["redo"] == 0, "a fresh edit must discard the redos"
+
+
+def test_history_is_per_page(base_url):
+    """A single global stack would make Ctrl+Z reach into a page already left."""
+    post(f"{base_url}/api/edit?page=0", {"id": first_element_id(base_url, 0), "text": "a"})
+
+    assert json.loads(get(f"{base_url}/api/page?page=2"))["history"]["undo"] == 0
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        post(f"{base_url}/api/undo?page=2", {})
+    assert exc.value.code == 409
+
+
+def test_undoing_an_empty_history_is_409_not_500(base_url):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        post(f"{base_url}/api/redo?page=1", {})
+
+    assert exc.value.code == 409
+
+
+# --- export ----------------------------------------------------------------
+
+
+def test_export_writes_every_page_including_unvisited_ones(base_url, tmp_path, pdf):
+    """Editing page 0 must not export a one-page document."""
+    target = tmp_path / "out.json"
+    post(f"{base_url}/api/edit?page=0", {"id": first_element_id(base_url), "text": "kept"})
+
+    post(f"{base_url}/api/export", {"path": str(target)})
+
+    exported = json.loads(target.read_text(encoding="utf-8"))
+    assert len(exported["pages"]) == 3
+    assert exported["page_count"] == 3
+    assert exported["pages"][0]["elements"][0]["text"] == "kept"
+    assert exported["schema_version"] == "1.7"
+
+
+def test_export_defaults_beside_the_pdf(pdf):
+    workspace = Workspace(pdf)
+
+    path = workspace.export()
+
+    assert path.name == "doc.docyx.json"
+    assert json.loads(path.read_text(encoding="utf-8"))["pages"]
+    workspace.close()
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_export_validates_before_writing(pdf, tmp_path):
+    """A file that fails its own schema must not exist on disk."""
+    workspace = Workspace(pdf)
+    target = tmp_path / "invalid.json"
+    # Pydantic does not validate on assignment, so a bad value reaches export.
+    workspace.page(0).pages[0].elements[0].confidence.value = "not a number"
+
+    with pytest.raises(ValidationError):
+        workspace.export(str(target))
+
+    assert not target.exists()
+    workspace.close()
+
+
+def test_a_failed_page_does_not_block_export(tmp_path):
+    """Partial results are the documented contract; refusing to export good
+    pages over one bad one would invert it."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "readable", fontsize=11)
+    doc.new_page()  # no text layer -> fails the gate
+    path = tmp_path / "mixed.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    workspace = Workspace(str(path))
+    exported = json.loads(workspace.export().read_text(encoding="utf-8"))
+
+    assert [p["status"] for p in exported["pages"]] == ["ok", "failed"]
     workspace.close()

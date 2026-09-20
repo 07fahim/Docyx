@@ -69,6 +69,14 @@
   .grow { flex: 1; }
 
   header nav { display: flex; align-items: center; gap: 4px; }
+  .sep { width: 1px; height: 16px; background: var(--hair-strong); margin: 0 6px; }
+  #toast { position: fixed; bottom: 46px; left: 50%; transform: translateX(-50%);
+           background: var(--surface-3); border: 1px solid var(--hair-strong);
+           border-radius: var(--r-md); padding: 8px 14px; font-size: 12px;
+           font-family: var(--machine); color: var(--ink-muted);
+           box-shadow: 0 8px 24px #000a; }
+  #toast[hidden] { display: none; }
+  #toast.bad { border-color: var(--fail); color: var(--fail); }
   button {
     background: none; color: var(--ink-subtle); border: 1px solid transparent;
     border-radius: var(--r-xs); padding: 4px 8px; cursor: pointer; font: inherit;
@@ -147,6 +155,9 @@
   .said[contenteditable] { cursor: text; }
   .said[contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
   .editbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  /* A class-level `display` outranks the UA's [hidden] rule, so the bar
+     showed with nothing to save. Same trap as #toast. */
+  .editbar[hidden] { display: none; }
   .editbar .hint { font-family: var(--machine); font-size: 11px;
                    color: var(--ink-tertiary); }
   .editbar .err { color: var(--fail); font-size: 11px; }
@@ -206,6 +217,10 @@
     <span class="verdict" id="verdict"></span>
     <span class="grow"></span>
     <nav>
+      <button id="undo" title="Undo (Ctrl+Z)">&#8630;</button>
+      <button id="redo" title="Redo (Ctrl+Shift+Z)">&#8631;</button>
+      <button id="export" title="Write the whole document beside the PDF">Export</button>
+      <span class="sep"></span>
       <button id="prev" title="Previous page (&larr;)">&larr;</button>
       <span id="pageno">&mdash;</span>
       <button id="next" title="Next page (&rarr;)">&rarr;</button>
@@ -223,6 +238,7 @@
   </aside>
 </main>
 
+<div id="toast" hidden></div>
 <footer id="census"></footer>
 
 <script>
@@ -238,7 +254,7 @@ const $ = id => document.getElementById(id);
 
 const state = {
   index: 0, elements: [], image: null, selected: null, hovered: null,
-  scale: 1, hidden: new Set(), rows: [], top: [],
+  scale: 1, hidden: new Set(), rows: [], top: [], history: { undo: 0, redo: 0 },
 };
 
 // An edit outranks the confidence it replaced, so it is its own tier.
@@ -300,6 +316,19 @@ function draw() {
       // A tick in the tier colour: the verdict stays attached to the box.
       ctx.fillStyle = colourOf(el);
       ctx.fillRect(x, y - 3, Math.min(bw, 18), 2);
+      // Handles only where a drag is allowed, so their absence is the answer
+      // to "why can't I move this?" rather than a dead grab.
+      if (movable(el)) {
+        ctx.lineWidth = 1;
+        for (const name of HANDLES) {
+          const h = handlePos(el.geometry.bbox, name);
+          const hx = Math.round(h.x * state.scale), hy = Math.round(h.y * state.scale);
+          ctx.fillStyle = "#fff";
+          ctx.strokeStyle = "#010102";
+          ctx.fillRect(hx - 3, hy - 3, 6, 6);
+          ctx.strokeRect(hx - 3.5, hy - 3.5, 7, 7);
+        }
+      }
     }
   }
 }
@@ -317,12 +346,103 @@ function hit(ev) {
   return best;
 }
 
-canvas.addEventListener("click", ev => select(hit(ev)));
+/* ── moving and resizing a box ─────────────────────────────────
+   Same rule as text: whole elements only. A span's box is a slice of its
+   line's and a cell's of its table's, so dragging one would leave the
+   parent's geometry describing an area it no longer covers. */
+
+const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+const GRAB = 6;      // screen px of slop around a handle
+const MIN_BOX = 4;   // a box smaller than this is a mis-drag, not a correction
+let drag = null;
+
+const movable = el => el && state.top.includes(el);
+
+function point(ev) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (ev.clientX - r.left) / state.scale, y: (ev.clientY - r.top) / state.scale };
+}
+
+function handlePos(b, name) {
+  return {
+    x: b.x + (name.includes("w") ? 0 : name.includes("e") ? b.width : b.width / 2),
+    y: b.y + (name.includes("n") ? 0 : name.includes("s") ? b.height : b.height / 2),
+  };
+}
+
+function handleAt(el, p) {
+  const b = el.geometry.bbox, slop = GRAB / state.scale;
+  return HANDLES.find(name => {
+    const h = handlePos(b, name);
+    return Math.abs(p.x - h.x) <= slop && Math.abs(p.y - h.y) <= slop;
+  });
+}
+
+const within = (b, p) =>
+  p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height;
+
+/* Corners, not width/height: dragging an edge past the opposite one then
+   normalises instead of producing a negative size. */
+function resized(mode, b, dx, dy) {
+  let [x0, y0, x1, y1] = [b.x, b.y, b.x + b.width, b.y + b.height];
+  if (mode === "move") return { x: b.x + dx, y: b.y + dy, width: b.width, height: b.height };
+  if (mode.includes("w")) x0 += dx;
+  if (mode.includes("e")) x1 += dx;
+  if (mode.includes("n")) y0 += dy;
+  if (mode.includes("s")) y1 += dy;
+  return {
+    x: Math.min(x0, x1), y: Math.min(y0, y1),
+    width: Math.max(MIN_BOX, Math.abs(x1 - x0)),
+    height: Math.max(MIN_BOX, Math.abs(y1 - y0)),
+  };
+}
+
+canvas.addEventListener("mousedown", ev => {
+  const el = state.selected;
+  if (!movable(el)) return;
+  const p = point(ev);
+  const mode = handleAt(el, p) || (within(el.geometry.bbox, p) ? "move" : null);
+  if (!mode) return;
+  ev.preventDefault();
+  drag = { mode, from: p, box: { ...el.geometry.bbox }, moved: false };
+});
+
 canvas.addEventListener("mousemove", ev => {
+  const p = point(ev);
+  if (drag) {
+    drag.moved = true;
+    state.selected.geometry.bbox = resized(drag.mode, drag.box, p.x - drag.from.x, p.y - drag.from.y);
+    draw();
+    return;
+  }
+  const el = state.selected;
+  const over = movable(el) ? handleAt(el, p) : null;
+  canvas.style.cursor = over ? `${over}-resize`
+    : movable(el) && within(el.geometry.bbox, p) ? "move" : "crosshair";
   const h = hit(ev);
   if (h !== state.hovered) { state.hovered = h; draw(); }
 });
+
+window.addEventListener("mouseup", () => {
+  if (drag && drag.moved) commitMove(state.selected, drag.box);
+  drag = null;
+});
+
+canvas.addEventListener("click", ev => {
+  // A drag ends in a click; selecting the box under the cursor there would
+  // undo the move the user just made by re-selecting something smaller.
+  if (drag && drag.moved) return;
+  select(hit(ev));
+});
 canvas.addEventListener("mouseleave", () => { state.hovered = null; draw(); });
+
+async function commitMove(el, before) {
+  const bbox = el.geometry.bbox;
+  const body = await send("/api/move", { id: el.id, bbox });
+  if (!body) { el.geometry.bbox = before; draw(); return; }
+  patch(el, body.element);
+  census(); buildOutline(); select(el);
+}
 
 /* ── the inspector ────────────────────────────────────────────── */
 
@@ -353,6 +473,58 @@ function buildOutline() {
      </div>`).join("");
   for (const row of list.children)
     row.onclick = () => select(state.rows[+row.dataset.i]);
+}
+
+/* Every mutating route answers {element, history} and is reached through
+   here, so an error surfaces once, in one place, as a toast. */
+async function send(path, body) {
+  try {
+    const res = await fetch(`${path}?page=${state.index}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    if (data.history) setHistory(data.history);
+    return data;
+  } catch (e) {
+    toast(String(e.message || e), true);
+    return null;
+  }
+}
+
+/* In place. state.elements, state.top and the outline all hold references to
+   this object; replacing it would orphan every one of them. */
+function patch(el, updated) {
+  el.text = updated.text ?? null;
+  el.geometry = updated.geometry;
+  el.confidence = updated.confidence;
+  el.provenance = updated.provenance;
+}
+
+function setHistory(history) {
+  state.history = history || { undo: 0, redo: 0 };
+  $("undo").disabled = !state.history.undo;
+  $("redo").disabled = !state.history.redo;
+}
+
+let toastTimer;
+function toast(message, bad) {
+  const box = $("toast");
+  box.textContent = message;
+  box.className = bad ? "bad" : "";
+  box.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { box.hidden = true; }, bad ? 6000 : 3500);
+}
+
+async function timeTravel(path) {
+  const body = await send(path, {});
+  if (!body) return;
+  const el = state.elements.find(e => e.id === body.element.id);
+  if (el) patch(el, body.element);
+  census(); buildOutline(); select(el || null);
 }
 
 function select(el) {
@@ -453,26 +625,11 @@ function wireEdit(el) {
   function cancel() { box.innerText = before; bar.hidden = true; err.textContent = ""; }
 
   async function save() {
-    const text = box.innerText;
     $("save").disabled = true;
-    try {
-      const res = await fetch(`/api/edit?page=${state.index}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: el.id, text }),
-      });
-      const updated = await res.json();
-      if (!res.ok) throw new Error(updated.error || res.status);
-      // Patch in place: state.elements and the outline hold references to
-      // this object, and replacing it would orphan both.
-      el.text = updated.text;
-      el.confidence = updated.confidence;
-      el.provenance = updated.provenance;
-      census(); buildOutline(); select(el);
-    } catch (e) {
-      err.textContent = String(e.message || e);
-      $("save").disabled = false;
-    }
+    const body = await send("/api/edit", { id: el.id, text: box.innerText });
+    if (!body) { err.textContent = "not saved"; $("save").disabled = false; return; }
+    patch(el, body.element);
+    census(); buildOutline(); select(el);
   }
 }
 
@@ -533,6 +690,7 @@ async function load(index) {
     `<div class="issue ${cls}"><span>&#9888;</span><div>
        <code>${esc(i.code)}</code><p>${esc(i.message)}</p></div></div>`).join("");
 
+  setHistory(data.history);
   census();
   buildOutline();
   render(null);
@@ -552,7 +710,23 @@ function step(delta) {
 
 $("prev").onclick = () => load(state.index - 1);
 $("next").onclick = () => load(state.index + 1);
+$("undo").onclick = () => timeTravel("/api/undo");
+$("redo").onclick = () => timeTravel("/api/redo");
+$("export").onclick = async () => {
+  $("export").disabled = true;
+  toast("Exporting…");
+  const body = await send("/api/export", {});
+  if (body) toast(`Wrote ${body.path}`);
+  $("export").disabled = false;
+};
+
 document.addEventListener("keydown", e => {
+  // Undo stays live while typing: it is the escape hatch from a bad edit.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+    e.preventDefault();
+    timeTravel(e.shiftKey ? "/api/redo" : "/api/undo");
+    return;
+  }
   if (e.target.isContentEditable || e.target.tagName === "SUMMARY") return;
   if (e.key === "ArrowLeft" && state.index > 0) load(state.index - 1);
   else if (e.key === "ArrowRight" && !$("next").disabled) load(state.index + 1);
