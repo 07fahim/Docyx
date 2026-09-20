@@ -64,6 +64,27 @@ class NativeTextExtractor:
             elements.extend(block_lines)
         return elements
 
+    def text_in(self, page_num: int, bbox: BoundingBox) -> str:
+        """Native text inside a region, given in 150 DPI reference pixels.
+
+        The read half of bbox editing: a box is a claim about *which glyphs
+        these are*, so resizing one that does not re-read its text leaves the
+        element asserting a region and a string that disagree.
+
+        Takes reference pixels and converts once here, because every coordinate
+        crossing into this package is in them (§4) and re-deriving 150/72 at the
+        call site is how the two drift.
+        """
+        rect = fitz.Rect(
+            bbox.x / SCALE,
+            bbox.y / SCALE,
+            (bbox.x + bbox.width) / SCALE,
+            (bbox.y + bbox.height) / SCALE,
+        )
+        # Whitespace-collapsed: a box spanning two lines would otherwise carry
+        # the newline between them into a field that holds one line's text.
+        return " ".join(self.doc[page_num].get_text("text", clip=rect).split())
+
 
 def _layout(element: Element, siblings: List[Element], block_box: BoundingBox) -> TextLayout:
     """Indent and line height, measured against the block.

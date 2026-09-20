@@ -210,6 +210,77 @@ def test_moving_an_element_keeps_the_geometry_the_machine_proposed(pdf):
     workspace.close()
 
 
+@pytest.fixture
+def two_lines(tmp_path):
+    """One page, two well-separated lines, so a box can be grown across them."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "alpha", fontsize=11)
+    page.insert_text((72, 160), "beta", fontsize=11)
+    path = tmp_path / "two.pdf"
+    doc.save(str(path))
+    doc.close()
+    return str(path)
+
+
+def test_resizing_a_box_re_reads_the_text_inside_it(two_lines):
+    """A box is a claim about which glyphs these are.
+
+    Moving one without re-reading leaves the element asserting a region and a
+    string that came from a different region — so growing a line box to take in
+    a clipped word left the word out of the text, which is the entire reason
+    anyone drags the handle.
+    """
+    workspace = Workspace(two_lines)
+    first, second = workspace.page(0).pages[0].elements[:2]
+    assert first.text == "alpha" and second.text == "beta"
+
+    a, b = first.geometry.bbox, second.geometry.bbox
+    both = BoundingBox(
+        x=min(a.x, b.x) - 2, y=min(a.y, b.y) - 2,
+        width=max(a.x + a.width, b.x + b.width) - min(a.x, b.x) + 4,
+        height=max(a.y + a.height, b.y + b.height) - min(a.y, b.y) + 4,
+    )
+    workspace.move(0, first.id, both)
+
+    assert first.text == "alpha beta"
+    # The machine's own claim survives the drag, on both axes.
+    assert first.provenance.original_text == "alpha"
+    assert first.provenance.original_geometry["bbox"] == a.model_dump()
+    workspace.close()
+
+
+def test_a_re_read_box_keeps_the_original_from_the_FIRST_drag(two_lines):
+    """Two drags must not let the second claim the first's result as original."""
+    workspace = Workspace(two_lines)
+    first, second = workspace.page(0).pages[0].elements[:2]
+    b = second.geometry.bbox
+
+    workspace.move(0, first.id, BoundingBox(x=b.x - 2, y=b.y - 2,
+                                            width=b.width + 4, height=b.height + 4))
+    assert first.text == "beta"
+    workspace.move(0, first.id, BoundingBox(x=0, y=0, width=1, height=1))
+
+    assert first.text == ""            # nothing is inside a 1px box
+    assert first.provenance.original_text == "alpha"
+    workspace.close()
+
+
+def test_a_non_native_element_is_never_re_read_from_the_text_layer(two_lines):
+    """An OCR line's text is in no text layer, so re-reading would blank it."""
+    from docyx.core.metadata import ProvenanceSource
+
+    workspace = Workspace(two_lines)
+    element = workspace.page(0).pages[0].elements[0]
+    element.provenance.source = ProvenanceSource.OCR
+
+    workspace.move(0, element.id, BoundingBox(x=0, y=0, width=1, height=1))
+
+    assert element.text == "alpha"
+    assert element.provenance.original_text is None
+    workspace.close()
+
+
 def test_a_text_edit_never_overwrites_a_geometry_original(pdf):
     """The two originals are guarded separately. Sharing one `modified_by_user`
     flag as the guard meant whichever edit came second recorded nothing."""
@@ -698,8 +769,12 @@ def test_check_reports_a_defect_a_human_edit_created(pdf):
     workspace.move(0, element.id, BoundingBox(x=10, y=10, width=0, height=0))
     findings = workspace.check(0)
 
-    assert [f["code"] for f in findings] == ["ZERO_SIZE_BOX"]
-    assert findings[0]["ids"] == [element.id]
+    # Both, and the second is the re-read working: a box around nothing now
+    # holds the text of nothing. Before `move` re-read its region this element
+    # kept asserting the words it used to cover, which is the state the report
+    # exists to surface and could not, because the text still looked fine.
+    assert [f["code"] for f in findings] == ["ZERO_SIZE_BOX", "EMPTY_TEXT"]
+    assert all(f["ids"] == [element.id] for f in findings)
     workspace.close()
 
 

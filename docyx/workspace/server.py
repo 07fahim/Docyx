@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from docyx.analysis.check import check_page
 from docyx.analysis.headings import suggest
 from docyx.core.geometry import BoundingBox
+from docyx.core.metadata import ProvenanceSource
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import ASSIGNABLE_TYPES, Document, Element, Page
@@ -146,9 +147,34 @@ class Workspace:
             return self._record(index, self.find(index, element_id)).edit_text(text)
 
     def move(self, index: int, element_id: str, bbox: BoundingBox) -> Element:
-        """Correct an element's position or size through `edit_geometry` (§10)."""
+        """Correct an element's position or size, and re-read its text (§10).
+
+        **Moving a box without re-reading leaves the element asserting two
+        things that disagree**: a region, and a string that came from a
+        different region. Grow a line box to take in the word the extractor
+        clipped and the whole point of the correction is that the word joins
+        the text — which it did not, until this re-read existed.
+
+        Both mutations sit under one `_record`, so the gesture is one undo
+        rather than two: a person dragged a handle once.
+
+        Native text only. An OCR line's text is not in any text layer, so
+        re-reading would silently blank it; recognising the new crop is the
+        real answer there and it needs the detector, not this method.
+        """
         with self._lock:
-            return self._record(index, self.find(index, element_id)).edit_geometry(bbox)
+            element = self._record(index, self.find(index, element_id))
+            element.edit_geometry(bbox)
+            if (element.text is not None
+                    and element.provenance.source == ProvenanceSource.NATIVE_PDF):
+                # `edit_text`, never assignment, so `original_text` still records
+                # the machine's own claim from before the drag.
+                element.edit_text(self.renderer.text_extractor().text_in(index, bbox))
+                # The style runs described the old box and now describe nothing.
+                # Keeping them would leave a line whose children contradict it.
+                element.children = [c for c in element.children
+                                    if c.type != "text_span"]
+            return element
 
     def retype(self, index: int, element_id: str, type_: str) -> Element:
         """Correct the block's category through `edit_type` (§8)."""
