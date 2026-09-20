@@ -687,6 +687,15 @@ Three rules hold the UI together, and each one is load-bearing rather than decor
 
 Selecting an element scrims the page around it rather than tinting it, so the element's own pixels stay at full contrast — checking a claim against the pixels it came from is the whole job.
 
+**The outline pane is resizable, and that is what makes the extracted text readable at all.** At the old fixed 250px a Bengali line ellipsed after about four words, so the one pane that shows *what was extracted* could not be read — and proofreading that text is the job the workspace exists for. Drag the splitter, arrow-key it when focused, double-click to reset; the width persists in `localStorage`.
+
+- **Past 330px the rows wrap and the list stops being an index and becomes the page's text.** Derived rather than chosen: below that a wrapped line is three ragged words per row, which is worse than the ellipsis it replaced. So one gesture covers both jobs and there is no second control to explain.
+- **Clamped 190–640.** The floor keeps the reading-order number and the tier dot legible. The ceiling matters more: checking a claim against the pixels it came from is the whole point, so the pane can never squeeze the page out. Widening to 480 already drops `wiki_bn` p5 from 66% to 47%.
+- **Resizing goes through the same double-draw as `setZoom`.** Narrowing the pane widens the bench, which changes the fit scale and can toggle the bench's scrollbar — measuring in the same tick reads the pre-reflow width. Draw now *and* after the reflow, never only after.
+- **It is a splitter and not a set of preset widths**, because the useful width depends on the script and the page. A Latin page is legible at 250px; Bengali and Arabic are not, and hard-coding a second number would just be a worse guess.
+
+**A flat "all the text" pane was considered and rejected.** It is what page-transcription tools generally offer, and it would drop the two things this list is for: the tier dot that says how much to trust each line, and click-to-select, which is the return half of the selection loop. Wrapping the existing rows keeps both and shows the same text. Same reasoning as everywhere else here — take the idea, not the layout.
+
 **Zoom** (`−`/`+`/`0`, or the pill on the page) multiplies the fit scale rather than replacing it, so the percentage shown is the real one against the image. It was added because bbox handles shipped with no way to get close to them, which made small boxes uneditable in practice. The bench only gains a horizontal scrollbar above 1×, where the page genuinely is wider than it.
 
 **The category is editable**, through a control in the inspector rather than free text: the vocabulary travels with the page (`/api/page` carries `types`), so the viewer cannot offer a type the server would refuse. `Suggest` applies the typography proposals above, one `retype` each, so every one is separately undoable.

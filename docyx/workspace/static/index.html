@@ -116,8 +116,26 @@
      The return half of the selection loop. Ordered by `reading_order`,
      so the list IS the claim being made about the page — a wrong order
      is visible here as prose that stops making sense. */
-  #outline { width: 250px; flex: none; overflow: auto;
-             border-right: 1px solid var(--hair); background: var(--surface-1); }
+  #outline { width: var(--outline-w, 250px); flex: none; overflow: auto;
+             background: var(--surface-1); }
+
+  /* The splitter is the whole answer to "I cannot read the extracted text".
+     At 250px a Bengali line ellipses after about four words, which makes the
+     one pane that shows what was extracted unreadable — and proofreading that
+     text is the job. It is a drag handle rather than a preset because the
+     useful width depends on the script and the page, not on a number anyone
+     can pick in advance. Keyboard-operable: a drag-only control would put the
+     pane out of reach entirely for anyone not using a mouse. */
+  #split { flex: none; width: 7px; margin: 0 -3px; z-index: 2; cursor: col-resize;
+           background: linear-gradient(90deg, transparent 3px,
+                       var(--hair) 3px, var(--hair) 4px, transparent 4px); }
+  #split:hover, #split:focus-visible, #split.dragging {
+    background: linear-gradient(90deg, transparent 2px,
+                var(--accent) 2px, var(--accent) 5px, transparent 5px);
+    outline: none;
+  }
+  body.dragging { cursor: col-resize; user-select: none; }
+
   .row { display: flex; align-items: baseline; gap: 8px; padding: 5px 12px;
          cursor: pointer; border-left: 2px solid transparent; }
   .row:hover { background: var(--surface-3); }
@@ -130,6 +148,16 @@
   .row .t { flex: 1; font-size: 12px; color: var(--ink-subtle);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row[aria-selected="true"] .t { color: var(--ink); }
+
+  /* Past the wrap width the list stops being an index and becomes the page's
+     text. Derived, not chosen: below it a wrapped line is three ragged words
+     per row and the list is worse than the ellipsis, so wrapping earlier would
+     be a downgrade. Line height opens up too — unwrapped rows are a scannable
+     column, wrapped ones are read. */
+  body.wrap .row { align-items: flex-start; padding: 7px 12px; }
+  body.wrap .row .t { white-space: pre-wrap; overflow-wrap: anywhere;
+                      overflow: visible; text-overflow: clip; line-height: 1.5; }
+  body.wrap .row .n { position: relative; top: 1px; }
 
   /* ── bench + rail ───────────────────────────────────────────── */
   main { flex: 1; display: flex; min-height: 0; }
@@ -262,7 +290,8 @@
 
   @media (max-width: 860px) {
     main { flex-direction: column; }
-    #outline { display: none; }
+    /* Stacked, so a vertical splitter would resize nothing. */
+    #outline, #split { display: none; }
     aside { width: auto; border-left: none; border-top: 1px solid var(--hair); }
     .bar { flex-wrap: wrap; gap: 8px 12px; }
   }
@@ -297,6 +326,9 @@
 
 <main>
   <div id="outline" role="listbox" aria-label="Elements in reading order"></div>
+  <div id="split" tabindex="0" role="separator" aria-orientation="vertical"
+       aria-label="Resize the text pane — arrow keys, or double-click to reset"
+       title="Drag to resize · double-click to reset"></div>
   <div id="bench">
     <canvas id="c" tabindex="0" aria-label="Page with extracted elements"></canvas>
     <div id="zoom">
@@ -1115,6 +1147,72 @@ document.addEventListener("keydown", e => {
 });
 try { setTheme(localStorage.getItem("docyx-theme") || "dark"); }
 catch (e) { setTheme("dark"); }
+
+/* ── the text pane's width ─────────────────────────────────────────
+   MIN keeps the reading-order number and the tier dot legible; MAX stops the
+   pane eating the page it is a claim about — checking the text against the
+   pixels it came from is the whole job, so the page can never be squeezed out.
+   WRAP is where a wrapped line stops being three ragged words. */
+const OUTLINE = { MIN: 190, MAX: 640, DEFAULT: 250, WRAP: 330 };
+
+function setOutlineWidth(px, persist = true) {
+  const w = Math.round(Math.min(OUTLINE.MAX, Math.max(OUTLINE.MIN, px)));
+  document.documentElement.style.setProperty("--outline-w", w + "px");
+  document.body.classList.toggle("wrap", w >= OUTLINE.WRAP);
+  $("split").setAttribute("aria-valuenow", w);
+  if (persist) try { localStorage.setItem("docyx-outline", w); } catch (e) { /* private mode */ }
+  // Narrowing the pane widens the bench, which changes the fit scale and can
+  // toggle the bench's scrollbar. Same trap as setZoom: measuring in this tick
+  // reads the pre-reflow width, so draw now AND after the reflow — never only
+  // after, because a throttled frame would leave the page stale.
+  draw();
+  requestAnimationFrame(draw);
+}
+
+(function outlineResizer() {
+  const bar = $("split");
+  bar.setAttribute("aria-valuemin", OUTLINE.MIN);
+  bar.setAttribute("aria-valuemax", OUTLINE.MAX);
+
+  bar.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    // Pointer capture, so a fast drag that outruns the 7px bar keeps resizing
+    // instead of silently dropping the gesture over the canvas.
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("dragging");
+    document.body.classList.add("dragging");
+    const startX = e.clientX, startW = $("outline").getBoundingClientRect().width;
+    const move = ev => setOutlineWidth(startW + ev.clientX - startX, false);
+    const up = ev => {
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", up);
+      bar.removeEventListener("pointercancel", up);
+      bar.classList.remove("dragging");
+      document.body.classList.remove("dragging");
+      setOutlineWidth(startW + ev.clientX - startX);   // persist once, at rest
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", up);
+    bar.addEventListener("pointercancel", up);
+  });
+
+  bar.addEventListener("dblclick", () => setOutlineWidth(OUTLINE.DEFAULT));
+  bar.addEventListener("keydown", e => {
+    const step = e.shiftKey ? 64 : 16;
+    const now = $("outline").getBoundingClientRect().width;
+    if (e.key === "ArrowLeft") setOutlineWidth(now - step);
+    else if (e.key === "ArrowRight") setOutlineWidth(now + step);
+    else if (e.key === "Home") setOutlineWidth(OUTLINE.DEFAULT);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();   // the document handler steps the selection on arrows
+  });
+
+  let saved = null;
+  try { saved = localStorage.getItem("docyx-outline"); } catch (e) { /* private mode */ }
+  setOutlineWidth(+saved || OUTLINE.DEFAULT, false);
+})();
+
 window.addEventListener("resize", draw);
 load(0);
 loadDocuments();
