@@ -76,6 +76,17 @@ def adjacent_accuracy(order, pred_rank) -> float:
 
 def load_truth(path: Path) -> dict:
     truth = json.loads(path.read_text(encoding="utf-8"))
+    if "order" not in truth:
+        # Each scorer globs its own directory, so a stray file here is a truth
+        # file for a different harness. The OCR reference sat in this directory
+        # for a session and crashed every run with a bare KeyError, which read
+        # as "the harness is broken" rather than "this file is in the wrong
+        # place" — and made the documented tau unreproducible.
+        raise SystemExit(
+            f"{path.name} has no 'order': this is not a reading-order truth "
+            f"file. Type truth belongs in truth/types/, table truth in "
+            f"truth/tables/, OCR references in truth/ocr/."
+        )
     order = truth["order"]
     # A truth file with a repeated or missing index would silently produce a
     # meaningless score, so fail loudly instead — hand-labelling is error-prone.

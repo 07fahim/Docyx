@@ -10,11 +10,21 @@ phase 4. Phase 6 (OCR) was pulled forward and is measured, not pending, and its
 The workspace now covers text, geometry and category editing with undo/redo,
 export, resume, a page check report, and a folder of PDFs as one session.
 
-**What is left is evidence, not features.** Reading-order truth is 8 pages and
-type truth is 5 (`scripts/measure_types.py`). **Table structure has no scorer at
-all** — a real Table Transformer is wired through the seam and nothing can say
-whether its grid is right. That is the last place in the repo still shipping a
-capability with no way to grade it.
+**Every capability now has a scorer.** Reading order (8 pages), semantic roles
+(5, `scripts/measure_types.py`), OCR (4 flattened + 1 real scan), table
+structure (3 tables, `scripts/measure_tables.py`). What is left is *more*
+evidence rather than the first of it.
+
+One open result: **the Table Transformer does not beat naive geometry
+clustering** on the three labelled tables (mean adj F1 0.731 vs 0.766). That is
+an argument for building a model-free table heuristic — `TableAnalyzer._heuristic`
+still returns `[]` — rather than for depending on weights.
+
+**Truth files live one directory per scorer**: `.corpus/truth/*.json` is reading
+order, `truth/types/`, `truth/tables/`, `truth/ocr/`. Each scorer globs its own
+directory, so a file for one harness must never sit in another's — the OCR truth
+file spent a session in the reading-order directory and crashed that scorer on
+every run.
 
 Phases 1–3 are implemented and committed; this file was never updated as they
 landed and claimed "Current Phase: None" until 2026-09-14.
@@ -277,7 +287,7 @@ autosave, and that is the next judgement call rather than a defect.
 4. **Expand the corpus** from 8 labelled pages once annotation is cheap.
 5. **More real scans.** The first one is measured — `81_Annexure-1.pdf`,
    a Bangladesh Bank return, **CER 0.075** against a hand-typed reference
-   (`.corpus/truth/real_81_annexure.p0.json`), or 0.037 excluding the
+   (`.corpus/truth/ocr/real_81_annexure.p0.json`), or 0.037 excluding the
    form's dotted leaders, with all 44 distinct Bengali glyphs recovered.
    Over half the measured "error" turned out to be leader dots collapsing,
    which changes no meaning. One page, one producer, one transcriber — a

@@ -15,7 +15,7 @@ generated: a real scan, graded against a hand-typed reference, because the page
 has no text layer to grade against.
 
     PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py \
-        --truth .corpus/truth/real_81_annexure.p0.json \
+        --truth .corpus/truth/ocr/real_81_annexure.p0.json \
         .corpus/real/81_Annexure-1.pdf 0 ben+eng
 
 The truth file carries the PDF's sha256 and the run refuses to score a

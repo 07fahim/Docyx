@@ -95,7 +95,9 @@ Three guards, each added because removing it regressed a measured case:
 | `MIN_COLUMN_WIDTH_RATIO` 0.25 | Table columns are narrow. Without this, a results table reads downwards — cost 64 points on one GPT-3 page. 0.25 not 0.30 so three-column layouts survive. |
 | `ROW_GAP_FACTOR` 1.5, widest gap only | Cutting at *every* gap shatters a two-column body into strips that each still hold both columns. |
 
-Graded against hand-labelled ground truth in `.corpus/truth/`, not against another tool:
+Graded against hand-labelled ground truth in `.corpus/truth/`, not against another tool.
+
+**One directory per scorer**, and it is load-bearing: each harness globs its own directory, so a truth file for one must never sit in another's. `.corpus/truth/*.json` is reading order; `truth/types/`, `truth/tables/`, `truth/ocr/` are the rest. The OCR reference spent a session in the reading-order directory and crashed that scorer on every run with a bare `KeyError` — which reads as "the harness is broken" and left the tau quoted below unreproducible. `load_truth` now names the problem instead.
 
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe scripts/dump_lines.py .corpus/x.pdf 3   # labelling worksheet
@@ -381,7 +383,7 @@ Every row above is a born-digital page flattened to pixels — a ceiling. `--tru
 
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py \
-    --truth .corpus/truth/real_81_annexure.p0.json .corpus/real/81_Annexure-1.pdf 0 ben+eng
+    --truth .corpus/truth/ocr/real_81_annexure.p0.json .corpus/real/81_Annexure-1.pdf 0 ben+eng
 ```
 
 `.corpus/real/81_Annexure-1.pdf` — a Bangladesh Bank agent-banking return, producer `SECnvtToPDF`, mixed Bengali and English, a ruled table, a handwritten signature. Derived `source_type: scanned`, `status: partial` / `OCR_TEXT`, exactly as the contract says.
