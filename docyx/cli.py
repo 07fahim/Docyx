@@ -7,6 +7,7 @@
     python -m docyx document.pdf --pages 0-4,9    # selected pages only
     python -m docyx scan.pdf --ocr ben            # recognise a scanned page
     python -m docyx paper.pdf -f bundle -o out/   # directory tree, one file per page
+    python -m docyx book.pdf -f bornochinho -o out/ --layout   # annotation pairs
 
 Exit codes matter more than the output format for anything scripted:
 
@@ -24,8 +25,12 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from docyx.export.bornochinho import write_bornochinho
 from docyx.export.bundle import write_bundle
 from docyx.export.markdown import to_markdown
+
+#: Formats that produce a directory rather than a single file.
+TREE_FORMATS = frozenset({"bundle", "bornochinho"})
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import Document, PageStatus
 
@@ -88,9 +93,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "-f",
         "--format",
-        choices=("json", "markdown", "bundle"),
+        choices=("json", "markdown", "bundle", "bornochinho"),
         default="json",
-        help="bundle writes a directory tree; default: json",
+        help="bundle and bornochinho write directory trees; default: json",
     )
     parser.add_argument("--pages", help='zero-based, e.g. "0-4,9"')
     parser.add_argument(
@@ -153,7 +158,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         args.output.mkdir(parents=True, exist_ok=True)
     # One input written to an existing directory: caught here rather than as an
     # IsADirectoryError traceback from write_text() outside the try block.
-    if not many and args.format != "bundle" and args.output and args.output.is_dir():
+    if not many and args.format not in TREE_FORMATS and args.output and args.output.is_dir():
         parser.error(f"{args.output} is a directory; give a file path, or use -f bundle")
 
     if args.ocr_repair and not args.ocr:
@@ -210,12 +215,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             worst = max(worst, 2)
             continue
 
-        if args.format == "bundle":
+        if args.format in TREE_FORMATS:
             # A tree cannot go to stdout.
             if args.output is None:
-                parser.error("-f bundle writes a directory tree, so -o DIR is required")
+                parser.error(f"-f {args.format} writes a directory tree, so -o DIR is required")
             target = args.output / pdf.stem if many else args.output
-            paths = write_bundle(document, str(pdf), target)
+            write = write_bundle if args.format == "bundle" else write_bornochinho
+            paths = write(document, str(pdf), target)
             if not args.quiet:
                 print(f"{target}: {len(paths)} files", file=sys.stderr)
         else:
