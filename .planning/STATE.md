@@ -266,9 +266,15 @@ autosave, and that is the next judgement call rather than a defect.
    without one produces data nothing measures against. This is real work, not
    a side effect of (2).
 4. **Expand the corpus** from 8 labelled pages once annotation is cheap.
-5. **Source real scans**, hand-type truth, then measure OCR by CER. No real
-   scan has ever been through this pipeline; the one in `.corpus/real/`
-   arrived inside an ordinary circular bundle.
+5. **More real scans.** The first one is measured — `81_Annexure-1.pdf`,
+   a Bangladesh Bank return, **CER 0.075** against a hand-typed reference
+   (`.corpus/truth/real_81_annexure.p0.json`), or 0.037 excluding the
+   form's dotted leaders, with all 44 distinct Bengali glyphs recovered.
+   Over half the measured "error" turned out to be leader dots collapsing,
+   which changes no meaning. One page, one producer, one transcriber — a
+   data point, not a benchmark. The gap now is *breadth*: a second scanner
+   and a skewed page, since the sweep says skew is the degradation that
+   costs Bengali the most.
 
 ## Known gaps, measured
 
@@ -276,7 +282,7 @@ autosave, and that is the next judgement call rather than a defect.
 |---|---|
 | Layout model | weakest component. No `Title` on a paper's title page; region grouping scored *worse* (1.000 to 0.519) |
 | Reading order | 0.976 tau / 0.957 adj. Multi-line table cells at 0.808 are a semantic ambiguity geometry cannot resolve |
-| OCR | measured on flattened born-digital pages only |
+| OCR | one real scan measured, CER 0.075 (0.037 excluding form leaders), 44/44 Bengali glyphs. Everything else is flattened born-digital |
 | Corpus | 8 labelled pages, 5 documents, ~20 real files, 2 sources |
 | `reading_order` provenance | §10 asks for confidence and provenance; it is a bare int |
 | §10 step 1 | "use native PDF structure" never implemented |

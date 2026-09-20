@@ -255,6 +255,40 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/arxiv_atten
 
 English is 0.959 rather than 1.0 because OCR additionally picks up figure labels that the native layer holds as vector art (`Output Probabilities Linear Nx Nx Positional…`), which is extra content, not an error.
 
+#### A real scan, finally
+
+Every row above is a born-digital page flattened to pixels — a ceiling. `--truth FILE` grades an actual scanner's output against a hand-typed reference, because the page has **no text layer to grade against**:
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py \
+    --truth .corpus/truth/real_81_annexure.p0.json .corpus/real/81_Annexure-1.pdf 0 ben+eng
+```
+
+`.corpus/real/81_Annexure-1.pdf` — a Bangladesh Bank agent-banking return, producer `SECnvtToPDF`, mixed Bengali and English, a ruled table, a handwritten signature. Derived `source_type: scanned`, `status: partial` / `OCR_TEXT`, exactly as the contract says.
+
+| | |
+|---|---|
+| **CER** | **0.075** — 0.037 excluding the form's dotted leaders |
+| sequence similarity | 0.954 |
+| character overlap | 0.916 |
+| distinct Bengali glyphs recovered | **44 / 44** |
+| mean confidence | 0.898 |
+
+**Where the 79 edited characters actually are**, which is the part worth keeping:
+
+| | share of errors | share of page |
+|---|---|---|
+| dotted leaders (`..........` form blanks, collapsed to `...`) | 53% | 4.2% |
+| Bengali | 28% | 2.2% |
+| Latin | 14% | 1.1% |
+| danda `।` read as `|` or `৷` | 5% | 0.4% |
+
+**Over half the "error" is a form artifact, not recognition.** A row of leader dots is a blank to be filled in; collapsing it changes no meaning. Quote 0.037 for text and 0.075 for the literal page, and say which.
+
+The real misses are small and specific: `Particulars` read as `15` (a table header lost to the ruling beside it), and `ঃ` → `£ &`. **Bengali held up** — every distinct glyph on the page came back, which is the opposite of `word_bn.pdf`'s broken text layer where four characters were absent entirely.
+
+**The honest caveat on the reference:** it was transcribed from the rendered page and cross-checked at 1.8× on three crops. That is what a human annotator does, but it is one transcriber and one page, so treat it as a first real data point rather than a benchmark. The truth file carries the PDF's `sha256` and the harness refuses to score a different file.
+
 #### `--ocr-repair`
 
 The finding above is wired up, behind its own flag:
@@ -335,7 +369,7 @@ existed.
 
 ### Known gaps
 
-- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. Measured on flattened born-digital pages only — **no real scan has ever been through this pipeline**, so skew, JPEG artefacts and show-through are entirely unrepresented in every number above.
+- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **One** real scan is now measured (CER 0.075, see above) — one page, one producer, one transcriber. Everything else is flattened born-digital, so skew and show-through remain largely unrepresented.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is still unused, and has no planned producer.

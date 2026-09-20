@@ -6,13 +6,27 @@ is the reference, so this measures the recogniser rather than the page.
 
     PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/wiki_ar.pdf 6 ara
 
-What it does NOT measure: a real scan. A synthetic one is clean, deskewed and
-noise-free, so these numbers are a CEILING — real scans have JPEG artefacts,
-skew and show-through, and will score below this. Treat a bad result here as
-conclusive and a good one as necessary-but-not-sufficient.
+A flattened page is clean, deskewed and noise-free, so these numbers are a
+CEILING. Treat a bad result here as conclusive and a good one as
+necessary-but-not-sufficient.
+
+`--truth FILE` is the other half, and the only mode that touches a page nobody
+generated: a real scan, graded against a hand-typed reference, because the page
+has no text layer to grade against.
+
+    PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py \
+        --truth .corpus/truth/real_81_annexure.p0.json \
+        .corpus/real/81_Annexure-1.pdf 0 ben+eng
+
+The truth file carries the PDF's sha256 and the run refuses to score a
+different file, because a reference typed from one scan says nothing about
+another.
 """
 
 import difflib
+import hashlib
+import json
+import pathlib
 from collections import Counter
 import sys
 import unicodedata
@@ -151,6 +165,74 @@ def main(pdf_path: str, page_num: int, lang: str) -> int:
     return 0
 
 
+def cer(reference: str, hypothesis: str) -> float:
+    """Character error rate: edits per reference character, the OCR standard.
+
+    `difflib` counts matches, so errors are everything else. Reported next to
+    similarity because a ratio of 0.9 sounds good and a CER of 0.10 does not,
+    and the second framing is the one the literature uses.
+    """
+    matches = sum(b.size for b in
+                  difflib.SequenceMatcher(None, reference, hypothesis).get_matching_blocks())
+    return (max(len(reference), len(hypothesis)) - matches) / max(len(reference), 1)
+
+
+def against_truth(pdf_path: str, page_num: int, lang: str, truth_path: str) -> int:
+    """Score OCR of a REAL scan against a hand-typed reference.
+
+    `main` destroys a born-digital page's text layer and grades against the
+    text it threw away, which measures the recogniser on a clean, deskewed,
+    noise-free page — a ceiling. This grades the thing that was never measured:
+    an actual scanner's output, where the reference had to be typed by a human
+    because the page has no text layer at all.
+    """
+    truth = json.loads(pathlib.Path(truth_path).read_text(encoding="utf-8"))
+    digest = hashlib.sha256(pathlib.Path(pdf_path).read_bytes()).hexdigest()
+    if digest != truth.get("sha256"):
+        print(f"REFUSING: {pdf_path} is not the file this truth was typed from.\n"
+              f"  truth  {truth.get('sha256', '')[:16]}\n  actual {digest[:16]}")
+        return 2
+
+    detector = TesseractDetector(lang=lang)
+    if not set(lang.split("+")) <= set(detector.languages()):
+        print(f"language data for {lang!r} is not installed; have {detector.languages()}")
+        return 2
+
+    # No flattening: the page IS an image, which is the whole point.
+    page = DocyxPipeline(ocr_analyzer=OCRAnalyzer(detector=detector)).process(
+        pdf_path, "scan", pages=[page_num]
+    ).pages[0]
+    recognised = normalise(page_text(page))
+    reference = normalise(" ".join(truth["lines"]))
+
+    ratio = difflib.SequenceMatcher(None, reference, recognised).ratio()
+    a = Counter(c for c in reference if not c.isspace())
+    b = Counter(c for c in recognised if not c.isspace())
+    overlap = sum((a & b).values()) / max(sum(a.values()), 1)
+    confidences = [el.confidence.value for el in page.elements if el.text]
+
+    bengali = {c for c in reference if "ঀ" <= c <= "৿"}
+    found = {c for c in recognised if "ঀ" <= c <= "৿"}
+
+    print(f"{pdf_path} p{page_num}  lang={lang}   REAL SCAN")
+    print(f"  status            {page.status.value}  ({[w.code for w in page.warnings]})")
+    print(f"  source_type       {page.source_type}")
+    print(f"  lines             {len(truth['lines'])} typed -> {len(confidences)} ocr")
+    print(f"  characters        {len(reference)} typed -> {len(recognised)} ocr")
+    print(f"  CER               {cer(reference, recognised):.3f}   <- errors per reference char")
+    print(f"  similarity        {ratio:.3f}   <- sequence; order-sensitive")
+    print(f"  character overlap {overlap:.3f}   <- multiset; order-insensitive")
+    print(f"  bengali glyphs    {len(bengali & found)}/{len(bengali)} of the distinct ones present")
+    if confidences:
+        print(f"  mean confidence   {sum(confidences) / len(confidences):.3f}   "
+              f"(min {min(confidences):.2f})")
+    print(f"\n  note: {truth.get('caveat', '')}")
+    print(f"  excludes: {truth.get('excludes', '')}")
+    print("\n  typed:", reference[:150])
+    print("  ocr  :", recognised[:150])
+    return 0
+
+
 def sweep(pdf_path: str, page_num: int, lang: str) -> int:
     """How fast does accuracy fall as the page gets more scan-like?
 
@@ -189,9 +271,17 @@ def sweep(pdf_path: str, page_num: int, lang: str) -> int:
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--sweep"]
+    argv = sys.argv[1:]
+    truth = None
+    if "--truth" in argv:
+        at = argv.index("--truth")
+        truth = argv[at + 1]
+        argv = argv[:at] + argv[at + 2:]
+    args = [a for a in argv if a != "--sweep"]
     if len(args) != 3:
         print(__doc__)
         raise SystemExit(2)
-    run = sweep if "--sweep" in sys.argv else main
+    if truth:
+        raise SystemExit(against_truth(args[0], int(args[1]), args[2], truth))
+    run = sweep if "--sweep" in argv else main
     raise SystemExit(run(args[0], int(args[1]), args[2]))
