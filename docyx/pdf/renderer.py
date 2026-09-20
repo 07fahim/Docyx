@@ -25,6 +25,19 @@ class PDFRenderer:
                 "v1 accepts PDF only"
             )
 
+        # A password-protected PDF also opens cleanly, and then every page
+        # raises. Left alone that reported `1 failed [PAGE_UNREADABLE]`, which
+        # reads as a damaged file rather than one nobody supplied the password
+        # for — so the user chases the wrong problem. This is the same class as
+        # the zero-page case below: rejected at the boundary, where the reason
+        # is still known.
+        if self.doc.needs_pass:
+            self.doc.close()
+            raise ValueError(
+                "PDF is password-protected; Docyx does not accept passwords, "
+                "so decrypt it first"
+            )
+
         # A zero-page PDF opens cleanly. Left alone it returns a Document
         # with no pages and no error, and the CLI exits 0.
         if len(self.doc) == 0:

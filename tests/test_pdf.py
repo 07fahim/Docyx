@@ -272,3 +272,53 @@ def test_pymupdf_stays_inside_docyx_pdf():
     ]
 
     assert not offenders, f"PyMuPDF imported outside docyx/pdf/: {offenders}"
+
+
+# --- input the boundary has to refuse ---------------------------------------
+
+
+def test_a_password_protected_pdf_is_refused_at_the_boundary(tmp_path):
+    """It opens cleanly and then every page raises, which reported
+    `1 failed [PAGE_UNREADABLE]` — a damaged file, not one nobody supplied the
+    password for. Same class as the zero-page case: reject where the reason is
+    still known."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "secret", fontsize=11)
+    path = tmp_path / "locked.pdf"
+    doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256,
+             user_pw="hunter2", owner_pw="owner")
+    doc.close()
+
+    with pytest.raises(ValueError, match="password-protected"):
+        PDFRenderer(str(path))
+
+
+def test_an_owner_password_does_not_block_reading(tmp_path):
+    """Owner passwords restrict permissions rather than access: the file opens
+    without one, so refusing it would reject a document anyone can read."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "restricted", fontsize=11)
+    path = tmp_path / "restricted.pdf"
+    doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="owner")
+    doc.close()
+
+    renderer = PDFRenderer(str(path))
+
+    assert renderer.page_count() == 1
+    renderer.close()
+
+
+@pytest.mark.parametrize("name,body", [
+    ("empty.pdf", b""),
+    ("garbage.pdf", b"%PDF-1.7\n" + bytes(range(256)) * 40),
+])
+def test_unreadable_files_raise_rather_than_returning_an_empty_document(
+    tmp_path, name, body
+):
+    """Exit 2 is "the input could not be read at all", and it only happens if
+    the renderer refuses rather than quietly producing zero pages."""
+    path = tmp_path / name
+    path.write_bytes(body)
+
+    with pytest.raises(Exception):
+        PDFRenderer(str(path))

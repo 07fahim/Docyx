@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (322 tests, ~38s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (328 tests, ~40s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -535,6 +535,10 @@ a hardcoded `born_digital` for three phases, which made it wrong on precisely th
 pages it exists to mark.
 
 **A zero-page PDF is rejected too**, in the same place. One of the real Arabic reports is a valid, unencrypted 14 MB `PDF 1.6` whose page tree resolves to nothing. Left alone, `process()` returned a `Document` with zero pages and no error, and the CLI exited **0** — because "every page produced a valid result" is vacuously true of no pages. A 14 MB file that produced nothing was being reported as a success.
+
+**A password-protected PDF is rejected there too.** It opens cleanly and then every page raises, which reported `1 failed [PAGE_UNREADABLE]` — indistinguishable from a damaged file, so the user chases corruption instead of finding the password. Now exit 2 with "decrypt it first". An *owner* password is deliberately not refused: it restricts permissions rather than access, the file opens without one, and rejecting it would turn away a document anyone can read.
+
+**The boundary was audited against hostile input**, each against the documented exit codes. A 0-byte file, a plausible header over garbage, a truncated PDF, and a PNG wearing a `.pdf` name all exit **2**; a password-protected file now does too. The contract held everywhere except the password case.
 
 **Non-PDF input is rejected at the boundary** in `PDFRenderer`. PyMuPDF also opens
 XPS, EPUB, CBZ and Office documents, so `fitz.open()` succeeding is not evidence of
