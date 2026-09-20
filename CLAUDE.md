@@ -362,7 +362,13 @@ Three rules hold the UI together, and each one is load-bearing rather than decor
 
 Selecting an element scrims the page around it rather than tinting it, so the element's own pixels stay at full contrast — checking a claim against the pixels it came from is the whole job.
 
-Editing is not wired up yet. The schema is ready for it — `edit_text()`, `modified_by_user`, `original_text`, `source: manual`.
+**Text editing is wired up.** `POST /api/edit?page=N` with `{id, text}` finds the element and calls `edit_text()` — the only writer, so every rule in **Human edits are provenance** holds unchanged: `source` stays put, `original_text` is written once, the element becomes `exact` / 1.0 and turns purple in the viewer.
+
+- **The edit lands on the cached `Document`**, which makes the per-page cache the session's working copy rather than a speed trick. Navigating away and back keeps the correction; closing the process loses it, because nothing writes to disk yet.
+- **Only whole lines are editable** — `state.top` in the viewer, i.e. no `text_span` and no `table_cell`. A span is a fragment of its line and a cell of its table, so correcting one would leave the parent's `text` stale and the two would disagree about the page. The server will happily edit a child by id (`_walk` descends, and a test pins that); the restriction is the UI's, and it is the line-granularity rule from §5 applied to writes.
+- **Bbox editing (§10) is still absent**, and needs the `original_geometry` decision before it lands.
+
+Undo/redo (§ phase 5 criterion 3) and export of edited JSON (criterion 4) are not built. `original_text` gives a one-step revert for free, but deliberately has no button: re-applying it through `edit_text()` would leave the line `exact` / 1.0 and `modified_by_user`, which claims a human vouched for text they just rejected.
 
 ## Planning docs
 

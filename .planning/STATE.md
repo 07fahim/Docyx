@@ -143,7 +143,7 @@ the trust question and the selection loop now closes both ways.
 | criterion | state |
 |---|---|
 | 1. Two-panel UI, synchronized selection | **Done** — reading-order outline drives the page, the page drives the outline |
-| 2. Interactive bbox editing + inspection | **half** — inspection done, no editing |
+| 2. Interactive bbox editing + inspection | **half** — text editing and inspection done, bbox editing not started |
 | 3. Per-page undo/redo | not started |
 | 4. Edited JSON validates and exports, errors block | not started |
 | 5. Headless CLI batch | Done (shipped in phase 4) |
@@ -166,10 +166,21 @@ argument for the viewer restated: a font size printed as
 the page unreadable, a solid green trust bar on a page whose verdict reads
 `PARTIAL`, and light Windows scrollbars on a near-black UI.
 
-Still missing: **editing**. The schema has been ready since phase 4 —
-`edit_text()`, `modified_by_user`, `original_text`, `source: manual` — and
-nothing in the UI calls any of it. The `edited` tier reads 0 in the census
-because no code path can produce one.
+**Third slice: text editing.** `POST /api/edit` calls `edit_text()` on the
+cached `Document` — the only writer, so the provenance rules hold by
+construction rather than by convention. Six tests pin them over HTTP, not
+just at the model: source unchanged, `original_text` from the first edit
+only, survives re-requesting the page, unknown id is 404 not 500, oversized
+body is 413, and a child element is reachable by id.
+
+Only whole lines are editable in the UI. A `text_span` is a fragment of its
+line, so correcting one would leave the parent's text stale — the §5
+line-granularity rule applied to writes.
+
+Still missing in phase 5: **bbox editing** (needs the `original_geometry`
+decision), **undo/redo**, and **export**. Edits live in the process and are
+lost when it exits, which is the next thing to fix — annotation that cannot
+be saved cannot expand the corpus.
 
 ## Decisions settled
 

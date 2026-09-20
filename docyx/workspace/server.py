@@ -22,9 +22,21 @@ from urllib.parse import parse_qs, urlparse
 
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pipeline.extractor import DocyxPipeline
-from docyx.schema.models import Document
+from docyx.schema.models import Document, Element, Page
 
 STATIC = Path(__file__).parent / "static"
+
+#: A corrected line, not a document. Anything larger is a client bug.
+MAX_EDIT_BYTES = 64 * 1024
+
+
+def _walk(page: Page):
+    """Every element on the page, children included."""
+    stack = list(page.elements) + list(page.diagnostic_elements)
+    while stack:
+        element = stack.pop()
+        yield element
+        stack.extend(element.children)
 
 
 class Workspace:
@@ -51,6 +63,17 @@ class Workspace:
 
     def image(self, index: int) -> bytes:
         return self.renderer.render_page(index)
+
+    def edit(self, index: int, element_id: str, text: str) -> Element:
+        """Apply a human correction through `edit_text`, never by assignment.
+
+        The edit lands on the cached `Document`, so it survives navigating
+        away and back — the cache is the session's working copy.
+        """
+        for element in _walk(self.page(index).pages[0]):
+            if element.id == element_id:
+                return element.edit_text(text)
+        raise KeyError(element_id)
 
     def close(self) -> None:
         self.renderer.close()
@@ -96,8 +119,35 @@ def _handler(workspace: Workspace):
                 else:
                     self._send(404, b"not found", "text/plain")
             except Exception as exc:  # noqa: BLE001 - one bad page must not kill the server
-                body = json.dumps({"error": f"{type(exc).__name__}: {exc}"}).encode("utf-8")
-                self._send(500, body, "application/json")
+                self._fail(500, exc)
+
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's API
+            url = urlparse(self.path)
+            if url.path != "/api/edit":
+                self._send(404, b"not found", "text/plain")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > MAX_EDIT_BYTES:
+                    self._send(413, b'{"error": "edit too large"}', "application/json")
+                    return
+                body = json.loads(self.rfile.read(length) or b"{}")
+                element = workspace.edit(
+                    self._page_index(url.query), body["id"], body["text"]
+                )
+                self._send(
+                    200,
+                    element.model_dump_json(exclude_none=True).encode("utf-8"),
+                    "application/json",
+                )
+            except KeyError as exc:
+                self._fail(404, exc)
+            except Exception as exc:  # noqa: BLE001 - a bad edit must not kill the server
+                self._fail(500, exc)
+
+        def _fail(self, status: int, exc: BaseException) -> None:
+            body = json.dumps({"error": f"{type(exc).__name__}: {exc}"}).encode("utf-8")
+            self._send(status, body, "application/json")
 
     return Handler
 

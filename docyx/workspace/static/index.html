@@ -17,7 +17,7 @@
     /* Lavender is chrome, never data — brand mark and focus rings only.
        Focus previously used the `detected` blue, which made a focus ring
        and a detector's claim the same colour. */
-    --accent: #5e6ad2;
+    --accent: #5e6ad2; --accent-hover: #828fff;
 
     /* Tiers are a schema contract, not a palette choice: saturated on
        purpose, because they ARE the data. `edited` sits magenta-side of
@@ -140,8 +140,18 @@
   .said.rtl { direction: rtl; text-align: right;
               border-left: none; border-right: 2px solid var(--hair-strong);
               border-radius: var(--r-md) 0 0 var(--r-md); }
-  .was { color: var(--ink-tertiary); text-decoration: line-through; display: block;
-         font-size: 12px; margin-bottom: 4px; }
+  .was { color: var(--ink-tertiary); text-decoration: line-through;
+         margin: 8px 0 0;
+         font-size: 12px; }
+  .was + .said { margin-top: 4px; }
+  .said[contenteditable] { cursor: text; }
+  .said[contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .editbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .editbar .hint { font-family: var(--machine); font-size: 11px;
+                   color: var(--ink-tertiary); }
+  .editbar .err { color: var(--fail); font-size: 11px; }
+  #save { background: var(--accent); color: #fff; }
+  #save:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
 
   dl { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; margin: 0; }
   dt { font: 600 10px/1.6 var(--voice); letter-spacing: .1em;
@@ -376,12 +386,21 @@ function render(el) {
   const styles = ["bold", "italic", "serif", "monospace", "superscript"]
     .filter(k => ty[k]).join(" · ");
 
+  // Only whole lines are editable. A `text_span` is a fragment of its line
+  // and a `table_cell` of its table, so correcting one would leave the
+  // parent's own text stale and the two would disagree about the page.
+  const editable = el.text != null && state.top.includes(el);
+
   box.innerHTML = `<div class="sect">
-    <div class="label" style="margin-bottom:7px">Element</div>
+    <div class="label" style="margin-bottom:8px">Element</div>
     <div class="claim"><b>${esc(el.type)}</b>${el.id ? ` &middot; ${esc(el.id)}` : ""}</div>
-    ${el.text ? `<div class="said${el.direction === "rtl" ? " rtl" : ""}">${
-      p.original_text ? `<span class="was">${esc(p.original_text)}</span>` : ""
-    }${esc(el.text)}</div>` : ""}
+    ${p.original_text ? `<div class="was">${esc(p.original_text)}</div>` : ""}
+    ${el.text != null ? `<div class="said${el.direction === "rtl" ? " rtl" : ""}"
+      ${editable ? `id="edit" contenteditable="true" spellcheck="false"` : ""}
+      >${esc(el.text)}</div>` : ""}
+    ${editable ? `<div class="editbar" hidden>
+      <button id="save">Save</button><button id="revert">Cancel</button>
+      <span class="hint">Ctrl+Enter</span><span class="err"></span></div>` : ""}
   </div>
   <div class="sect"><dl id="kv"></dl></div>
   <div class="sect"><details><summary>Raw JSON</summary><pre></pre></details></div>`;
@@ -412,6 +431,49 @@ function render(el) {
   if (el.children && el.children.length) row(dl, "Children", el.children.length);
 
   box.querySelector("pre").textContent = JSON.stringify(el, null, 2);
+  if (editable) wireEdit(el);
+}
+
+/* The only writer. `edit_text` runs server-side on the cached Document, so
+   provenance rules — source unchanged, original_text kept from the FIRST
+   edit — hold here exactly as they do for any other caller. */
+function wireEdit(el) {
+  const box = $("edit"), bar = box.nextElementSibling, err = bar.querySelector(".err");
+  const before = el.text;
+  const dirty = () => box.innerText !== before;
+
+  box.oninput = () => { bar.hidden = !dirty(); err.textContent = ""; };
+  box.onkeydown = ev => {
+    if (ev.key === "Escape") { ev.stopPropagation(); cancel(); box.blur(); }
+    else if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); save(); }
+  };
+  $("revert").onclick = cancel;
+  $("save").onclick = save;
+
+  function cancel() { box.innerText = before; bar.hidden = true; err.textContent = ""; }
+
+  async function save() {
+    const text = box.innerText;
+    $("save").disabled = true;
+    try {
+      const res = await fetch(`/api/edit?page=${state.index}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: el.id, text }),
+      });
+      const updated = await res.json();
+      if (!res.ok) throw new Error(updated.error || res.status);
+      // Patch in place: state.elements and the outline hold references to
+      // this object, and replacing it would orphan both.
+      el.text = updated.text;
+      el.confidence = updated.confidence;
+      el.provenance = updated.provenance;
+      census(); buildOutline(); select(el);
+    } catch (e) {
+      err.textContent = String(e.message || e);
+      $("save").disabled = false;
+    }
+  }
 }
 
 /* ── census and trust bar ─────────────────────────────────────── */
@@ -491,7 +553,7 @@ function step(delta) {
 $("prev").onclick = () => load(state.index - 1);
 $("next").onclick = () => load(state.index + 1);
 document.addEventListener("keydown", e => {
-  if (e.target.tagName === "SUMMARY") return;
+  if (e.target.isContentEditable || e.target.tagName === "SUMMARY") return;
   if (e.key === "ArrowLeft" && state.index > 0) load(state.index - 1);
   else if (e.key === "ArrowRight" && !$("next").disabled) load(state.index + 1);
   else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
