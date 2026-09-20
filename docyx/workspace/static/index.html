@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Docyx workspace</title>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="%230f1011"/><rect x="3" y="3" width="4" height="4" rx="1" fill="%231fbf62"/><rect x="9" y="3" width="4" height="4" rx="1" fill="%234b90f7"/><rect x="3" y="9" width="4" height="4" rx="1" fill="%23f2a413"/><rect x="9" y="9" width="4" height="4" rx="1" fill="%23cc66f0"/></svg>'>
 <style>
   /* Surface, ink, hairline and radius ladders are Linear's, via getdesign.md.
      The landing-page half of that system (96px sections, 80px display type)
@@ -67,7 +68,7 @@
   .v-failed b { color: var(--fail); }
   .grow { flex: 1; }
 
-  nav { display: flex; align-items: center; gap: 4px; }
+  header nav { display: flex; align-items: center; gap: 4px; }
   button {
     background: none; color: var(--ink-subtle); border: 1px solid transparent;
     border-radius: var(--r-xs); padding: 4px 8px; cursor: pointer; font: inherit;
@@ -77,11 +78,29 @@
   #pageno { font-family: var(--machine); font-variant-numeric: tabular-nums;
             color: var(--ink-subtle); font-size: 12px; min-width: 66px; text-align: center; }
 
-  /* The page's composition, by count. No labels — the census below names them. */
   /* Composition, not verdict: the word in the header and the banner carry
      that. Kept dim so a green bar can never outshout a PARTIAL status. */
   #trust { display: flex; height: 2px; background: var(--bench); opacity: .6; }
   #trust div { transition: opacity .15s; }
+
+  /* ── outline: the page as a reading-order list ──────────────────
+     The return half of the selection loop. Ordered by `reading_order`,
+     so the list IS the claim being made about the page — a wrong order
+     is visible here as prose that stops making sense. */
+  #outline { width: 250px; flex: none; overflow: auto;
+             border-right: 1px solid var(--hair); background: var(--surface-1); }
+  .row { display: flex; align-items: baseline; gap: 8px; padding: 5px 12px;
+         cursor: pointer; border-left: 2px solid transparent; }
+  .row:hover { background: var(--surface-3); }
+  .row[aria-selected="true"] { background: var(--surface-3);
+                               border-left-color: var(--accent); }
+  .row .n { font-family: var(--machine); font-variant-numeric: tabular-nums;
+            font-size: 11px; color: var(--ink-tertiary); width: 22px;
+            text-align: right; flex: none; }
+  .row i { width: 6px; height: 6px; border-radius: 2px; flex: none; }
+  .row .t { flex: 1; font-size: 12px; color: var(--ink-subtle);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row[aria-selected="true"] .t { color: var(--ink); }
 
   /* ── bench + rail ───────────────────────────────────────────── */
   main { flex: 1; display: flex; min-height: 0; }
@@ -163,6 +182,7 @@
 
   @media (max-width: 860px) {
     main { flex-direction: column; }
+    #outline { display: none; }
     aside { width: auto; border-left: none; border-top: 1px solid var(--hair); }
     .bar { flex-wrap: wrap; gap: 8px 12px; }
   }
@@ -185,6 +205,7 @@
 </header>
 
 <main>
+  <div id="outline" role="listbox" aria-label="Elements in reading order"></div>
   <div id="bench"><canvas id="c" tabindex="0" aria-label="Page with extracted elements"></canvas></div>
   <aside>
     <div id="issues"></div>
@@ -207,7 +228,7 @@ const $ = id => document.getElementById(id);
 
 const state = {
   index: 0, elements: [], image: null, selected: null, hovered: null,
-  scale: 1, hidden: new Set(),
+  scale: 1, hidden: new Set(), rows: [], top: [],
 };
 
 // An edit outranks the confidence it replaced, so it is its own tier.
@@ -295,8 +316,42 @@ canvas.addEventListener("mouseleave", () => { state.hovered = null; draw(); });
 
 /* ── the inspector ────────────────────────────────────────────── */
 
+/* Reading order is the page's claim about itself, so it orders the outline,
+   the arrow keys and nothing else. Elements it declines to number — tables,
+   regions, style runs — fall to the end rather than interleaving. */
+function ordered() {
+  // Top-level only. A line's own style runs are not separate reading
+  // positions, and listing 56 spans beside 10 lines buries the lines.
+  // Children stay clickable on the page; the inspector counts them.
+  return state.top.filter(el => !state.hidden.has(tier(el))).sort((a, b) => {
+    const ao = a.reading_order, bo = b.reading_order;
+    if (ao === bo) return a.geometry.bbox.y - b.geometry.bbox.y;
+    if (ao === null || ao === undefined) return 1;
+    if (bo === null || bo === undefined) return -1;
+    return ao - bo;
+  });
+}
+
+function buildOutline() {
+  state.rows = ordered();
+  const list = $("outline");
+  list.innerHTML = state.rows.map((el, i) =>
+    `<div class="row" data-i="${i}" role="option" aria-selected="false">
+       <span class="n">${el.reading_order ?? "&middot;"}</span>
+       <i style="background:${colourOf(el)}"></i>
+       <span class="t">${esc(el.text || "(" + el.type + ")")}</span>
+     </div>`).join("");
+  for (const row of list.children)
+    row.onclick = () => select(state.rows[+row.dataset.i]);
+}
+
 function select(el) {
   state.selected = el;
+  for (const row of $("outline").children) {
+    const on = state.rows[+row.dataset.i] === el;
+    row.setAttribute("aria-selected", on);
+    if (on) row.scrollIntoView({ block: "nearest" });
+  }
   render(el);
   draw();
 }
@@ -380,7 +435,7 @@ function census() {
     const k = btn.dataset.tier;
     state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k);
     if (state.selected && state.hidden.has(tier(state.selected))) select(null);
-    census(); draw();
+    census(); buildOutline(); draw();
   };
 }
 
@@ -398,6 +453,7 @@ async function load(index) {
   const p = data.page;
   state.index = data.index;
   state.selected = state.hovered = null;
+  state.top = (p.elements || []).concat(p.diagnostic_elements || []);
   state.elements = flatten(p.elements).concat(flatten(p.diagnostic_elements));
 
   $("file").textContent = data.filename || "(stream)";
@@ -416,6 +472,7 @@ async function load(index) {
        <code>${esc(i.code)}</code><p>${esc(i.message)}</p></div></div>`).join("");
 
   census();
+  buildOutline();
   render(null);
 
   const img = new Image();
@@ -425,17 +482,10 @@ async function load(index) {
 
 /* Up/Down walks reading order — the thing this project actually measures. */
 function step(delta) {
-  const list = shown().slice().sort((a, b) => {
-    const ao = a.reading_order, bo = b.reading_order;
-    if (ao === bo) return a.geometry.bbox.y - b.geometry.bbox.y;
-    if (ao === null || ao === undefined) return 1;
-    if (bo === null || bo === undefined) return -1;
-    return ao - bo;
-  });
+  const list = state.rows;
   if (!list.length) return;
   const at = list.indexOf(state.selected);
   select(list[Math.max(0, Math.min(list.length - 1, at + delta))] || list[0]);
-  canvas.scrollIntoView({ block: "nearest" });
 }
 
 $("prev").onclick = () => load(state.index - 1);
