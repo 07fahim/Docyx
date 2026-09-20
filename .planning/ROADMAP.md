@@ -92,7 +92,11 @@ phase 5** — see STATE.md. The recogniser adapter is written but unverified; wh
 remains of this phase is evidence, not code.
 **Mode:** mvp
 **Success Criteria:**
-1. `ocr` and `visual_inference` provenance sources become active.
+1. `ocr` provenance becomes active. (`visual_inference` was struck from this
+   criterion: it means typography estimated from pixels, and
+   `scripts/measure_type_size.py` shows the only available signal — an OCR
+   line's box height — cannot carry it. It stays reserved for a real
+   estimator, as the plan's §20 intends.)
 2. `inferred` confidence type is populated.
 3. Text extraction pipeline incorporates OCR without breaking schema v1.1 compatibility.
 

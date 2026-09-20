@@ -40,7 +40,7 @@ Reading order is the only stage genuinely dependent on text, which is why it sit
 - **Coordinates:** top-left origin, reference pixels at **150 DPI**. PDF points are multiplied by `SCALE` from [core/constants.py](docyx/core/constants.py) at every boundary — never re-derive `150/72` locally. Anything crossing into an `Element` must already be in 150-DPI space. The one deliberate exception is `Typography.font_size`, which stays in points. `bold`/`italic`/`serif`/`monospace`/`superscript` are **derived** from the `flags` bitfield rather than stored beside it, so the two cannot drift; they are `None` rather than `False` when the PDF said nothing, because "not stated" and "not bold" are different claims.
 - **Geometry is unified:** every element type uses the same `Geometry` — required `bbox`, optional `polygon`, optional `rotation`. Do not add per-type geometry shapes.
 - **Confidence is three-tier:** native text is always `value=1.0, type=exact`. Detected elements (layout, table, visual) carry probabilistic `detected` confidence. **`inferred` belongs to OCR and to nothing else** — that split is what lets a consumer tell read text from recognised text without parsing engine names.
-- **Provenance sources active:** `native_pdf`, `layout_model`, `table_model`, `geometry_inference`, `manual`, and `ocr` (only when an OCR detector is injected). `visual_inference` exists in the enum but must stay unused.
+- **Provenance sources active:** `native_pdf`, `layout_model`, `table_model`, `geometry_inference`, `manual`, and `ocr` (only when an OCR detector is injected). `visual_inference` stays reserved and unemitted — it means typography estimated from pixels, and the only available estimator was measured and rejected (**Typography from pixels**).
 - **Mixed documents are normal.** Partial results, never reject the whole document.
 
 ### Detector injection
@@ -435,7 +435,27 @@ So `analysis/headings.py` plus the manual control cover the same ground at a fra
 - **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **One** real scan is now measured (CER 0.075, see above) — one page, one producer, one transcriber. Everything else is flattened born-digital, so skew and show-through remain largely unrepresented.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
-- `visual_inference` provenance is still unused, and has no planned producer.
+- `visual_inference` provenance is unused, and the obvious producer was measured and declined — see below.
+
+### Typography from pixels was measured and declined
+
+An OCR'd line carries no typography at all: `OCRAnalyzer` emits `typography: None`, because a recogniser reports characters. That leaves the heading suggester dead on scanned pages, since it runs entirely on font size. `visual_inference` is the schema's reserved home for the fix — typography estimated from the image (§7, §20) — and the only signal available without a model is the recognised line's **box height**.
+
+`scripts/measure_type_size.py` grades it: flatten a born-digital page, OCR it, match each recognised line back to the native line it covers, compare against the font size the PDF declares.
+
+| page | height / font_size | size within 10% | "bigger than body" agrees |
+|---|---|---|---|
+| `arxiv_attention` p0 | 0.910 | 76% | 5 of 10 |
+| `arxiv_attention` p2 | 0.915 | 73% | **0 of 4** |
+| `rfc2616` p12 | 0.916 | 50% | **1 of 13** |
+| `nasa_budget` p88 | 0.964 | 67% | 2 of 6 |
+| `wiki_ar` p6 | **1.320** | **22%** | **0 of 28** |
+
+**The median error is 1.5% on the best page, and that number is worthless** — it is the median, and a schema value is per element. A line's box runs ascender to descender, so whether it happens to contain a `g` moves its height more than a real size change does. Latin sits at 0.91 and Arabic at 1.32, so there is not even one constant to divide by.
+
+**The ranking column is what kills it.** "Bigger than body" is the weaker claim and the only one the heading suggester needs, and box height *systematically over-reports*: `wiki_ar` p6 declares 2 such lines and pixel height claims 26. A suggester fed that would propose a heading on half the page.
+
+So `visual_inference` stays reserved rather than emitted, and phase 6's criterion asking it to become active was struck rather than satisfied. Re-open it when a real estimator exists — a model that reads weight and size off the glyphs — not with a bounding box.
 
 ## Workspace
 
@@ -535,7 +555,7 @@ No revert button, deliberately: `original_text` makes one trivial, but re-applyi
 
 `.planning/` (GSD workflow: `ROADMAP.md`, `STATE.md`, per-phase dirs) tracks the 6-phase roadmap. **Phases 1–5 are complete**; the CLI, listed under phase 5, shipped early in phase 4 because being fast and light buys nothing while the tool is import-only.
 
-**Phase 6 has one criterion that cannot be met as written.** It asks that "`ocr` and `visual_inference` provenance become active". `ocr` is live and measured. `visual_inference` is the enum value this file says "must stay unused", and nothing plans to produce it — so the roadmap is asking for something the architecture forbids. Resolve it by dropping the criterion or deleting the enum value; do not satisfy it by inventing a producer.
+**Phase 6's `visual_inference` criterion was measured and struck.** See **Typography from pixels** below; the roadmap now asks only that `ocr` become active, which it is.
 
 **The remaining debt is evidence, not features.** Reading-order truth is still 8 pages; one real scan is measured; and there is no scorer for semantic roles or table structure — so the type editing and the heading suggester both ship with nothing that can tell you whether their output is right. That is the trap the reading-order harness exists to avoid. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
 

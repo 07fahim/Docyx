@@ -81,7 +81,7 @@ made the tool untestable against the documents they actually have.
 
 | Roadmap criterion | Status |
 |---|---|
-| 1. `ocr` and `visual_inference` provenance become active | **Partly** — `ocr` is live; `visual_inference` still has no producer |
+| 1. `ocr` provenance becomes active | **Done** — `visual_inference` struck from the criterion and measured out, see below |
 | 2. `inferred` confidence is populated | **Done** — by `OCRAnalyzer` and nothing else |
 | 3. OCR incorporated without breaking schema compatibility | **Done** — schema v1.3 unchanged, contract test green |
 
