@@ -1,4 +1,4 @@
-"""python -m docyx.workspace document.pdf [--layout] [--tables] [--ocr LANG]"""
+"""python -m docyx.workspace (document.pdf | folder/) [--layout] [--tables] [--ocr LANG]"""
 
 import argparse
 import sys
@@ -11,7 +11,8 @@ def main(argv=None) -> int:
         prog="docyx.workspace",
         description="Look at what Docyx extracted, drawn over the rendered page.",
     )
-    parser.add_argument("pdf")
+    parser.add_argument("pdf", metavar="PDF_OR_FOLDER",
+                        help="a PDF, or a folder of them to step through")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--layout", action="store_true", help="detect layout regions")
@@ -46,7 +47,11 @@ def main(argv=None) -> int:
             layout_analyzer=layout, table_analyzer=tables, ocr_analyzer=ocr
         )
 
-    serve(args.pdf, port=args.port, open_browser=not args.no_browser, pipeline=pipeline)
+    try:
+        serve(args.pdf, port=args.port, open_browser=not args.no_browser,
+              pipeline=pipeline)
+    except ValueError as exc:
+        parser.error(str(exc))
     return 0
 
 

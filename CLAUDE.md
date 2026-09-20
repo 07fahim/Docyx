@@ -497,6 +497,7 @@ So `visual_inference` stays reserved rather than emitted, and phase 6's criterio
 
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx.workspace file.pdf [--layout] [--tables] [--ocr ben]
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx.workspace circulars/   # a folder, one session
 ```
 
 Renders each page with its extracted elements drawn over it, an outline of the page in reading order beside it, and an inspector for whatever is selected. Boxes are coloured by `confidence.type` — green `exact`, blue `detected`, amber `inferred`, purple edited — so a page's trustworthiness is visible before reading anything.
@@ -540,6 +541,12 @@ A block takes the colour of its **weakest** line: a paragraph holding one `infer
 `Provenance.original_geometry` is the reason for **schema v1.7**. It is guarded *separately* from `original_text`: the obvious implementation gates both on `modified_by_user`, and then whichever edit came second records nothing — correcting the text of a box you already moved would silently discard the geometry the machine proposed. Pinned by `test_a_text_edit_never_overwrites_a_geometry_original`. The same bug existed in `edit_text` alone and is now fixed: its guard is `original_text is None`, with `or ""` so an element that had no text still records that it had none rather than letting the *second* edit claim the first correction as the original.
 
 **Undo/redo restores a snapshot; it never re-applies an edit in reverse.** `_snapshot` deep-copies text, geometry, confidence and provenance together, because "edit it back" leaves `modified_by_user` set and the element `exact` / 1.0 — claiming a human vouched for a value they just took back. History is **per page**: a global stack would make Ctrl+Z reach into a page the user has already left. An empty history is `409`, a normal state rather than a fault.
+
+**A folder of PDFs opens as one session.** `python -m docyx.workspace circulars/` builds a `DocumentSet` and the filename in the header becomes a picker; a single PDF behaves exactly as before and shows no picker at all.
+
+- **A switched-away document keeps its `Workspace`, and therefore its edits.** The per-page cache *is* the session's working copy, so rebuilding it on a switch would silently discard every correction made there. The picker marks documents holding unexported work with a dot — the cliff is closing the process, not changing documents. *ponytail: memory grows with documents opened; add an LRU that refuses to evict an edited document if someone opens a folder of thousands.*
+- **`edited()` walks cached pages only.** Answering it properly would mean extracting every document in the folder to populate the picker, which is a full run per file before you have looked at one. A page nobody has opened cannot have been edited.
+- **This is not the two-folder-plus-Sync design it was modelled on.** That shape exists because the tool it comes from keeps page images and annotations as separate artifacts that can drift apart. Here one PDF produces both, so there is nothing to keep in step and no Sync control to build. Copying it would have added a control that can never be out of sync.
 
 **The page check report** is [docyx/analysis/check.py](docyx/analysis/check.py) → `GET /api/check?page=N` → cards in the inspector. Four faults that a `Document` can carry while validating perfectly and exporting without complaint, which is exactly why they need their own panel rather than a place beside the gate's `PageIssue`s: `ZERO_SIZE_BOX`, `BOX_OFF_PAGE`, `EMPTY_TEXT`, `STACKED_BOXES`.
 

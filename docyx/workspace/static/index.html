@@ -73,6 +73,11 @@
     padding-right: 14px; border-right: 1px solid var(--hair-strong);
   }
   #file { font-family: var(--machine); font-size: 13px; }
+  /* Monospace, because a filename is the machine's word and not ours. */
+  #docs { font-family: var(--machine); font-size: 13px; color: var(--ink);
+          background: var(--surface-1); border: 1px solid var(--hair-strong);
+          border-radius: var(--r-xs); padding: 3px 6px; max-width: 320px;
+          cursor: pointer; }
   .verdict { display: flex; align-items: baseline; gap: 8px; }
   .verdict b {
     font: 600 11px/1 var(--voice); letter-spacing: .08em; text-transform: uppercase;
@@ -268,6 +273,7 @@
   <div class="bar">
     <span class="mark">DOCYX</span>
     <span id="file">&mdash;</span>
+    <select id="docs" hidden title="Switch document (edits are kept)"></select>
     <span class="verdict" id="verdict"></span>
     <span class="grow"></span>
     <nav>
@@ -708,6 +714,38 @@ async function timeTravel(path) {
   census(); buildOutline(); select(el || null);
 }
 
+/* A folder of documents, not a folder of images beside a folder of
+   annotations: one PDF here produces both, so there is nothing to keep in
+   step and no Sync control to build. The picker replaces the filename in the
+   header and is hidden outright for a single document, which is the common
+   case and should cost no chrome.
+
+   A switched-away document keeps its Workspace and therefore its edits, and
+   `edited` marks the ones that exist only in memory — the cliff is closing
+   the process, not changing documents. */
+async function loadDocuments() {
+  try {
+    const data = await (await fetch("/api/documents")).json();
+    const names = data.documents || [];
+    $("docs").hidden = names.length < 2;
+    $("file").hidden = names.length > 1;
+    if (names.length < 2) return;
+    const edited = new Set(data.edited || []);
+    $("docs").innerHTML = names.map((n, i) =>
+      `<option value="${i}"${i === data.current ? " selected" : ""}>${
+        esc(n)}${edited.has(i) ? " •" : ""}</option>`).join("");
+  } catch (e) {
+    $("docs").hidden = true;
+  }
+}
+
+$("docs").onchange = async () => {
+  if (await send("/api/open", { index: +$("docs").value })) {
+    await load(0);
+    loadDocuments();
+  }
+};
+
 /* Defects that validate cleanly: a box with no size, a box off the page, an
    outlined line holding no text, two boxes stacked on one block. None of these
    is a gate issue and none blocks export, so they get their own panel rather
@@ -1079,4 +1117,5 @@ try { setTheme(localStorage.getItem("docyx-theme") || "dark"); }
 catch (e) { setTheme("dark"); }
 window.addEventListener("resize", draw);
 load(0);
+loadDocuments();
 </script>

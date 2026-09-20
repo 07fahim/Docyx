@@ -170,6 +170,19 @@ class Workspace:
         return {"undo": len(self._undo.get(index) or []),
                 "redo": len(self._redo.get(index) or [])}
 
+    def edited(self) -> bool:
+        """Whether this session has corrections that only exist in memory.
+
+        Cached pages only: extracting the unvisited ones to answer would make
+        a document picker cost a full run per document, and a page nobody has
+        opened cannot have been edited.
+        """
+        return any(
+            element.provenance.modified_by_user
+            for document in self._pages.values()
+            for element in _walk(document.pages[0])
+        )
+
     def check(self, index: int) -> List[Dict[str, Any]]:
         """Advisory findings for a page. Never mutates, so it is safe to re-run
         after every edit — which is how a reviewer would want to use it."""
@@ -302,7 +315,7 @@ class Workspace:
         self.renderer.close()
 
 
-def _handler(workspace: Workspace):
+def _handler(documents: "DocumentSet"):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # noqa: A003 - quieten the default logging
             pass
@@ -315,12 +328,14 @@ def _handler(workspace: Workspace):
             self.wfile.write(body)
 
         def _page_index(self, query) -> int:
+            workspace = documents.current()
             index = int(parse_qs(query).get("page", ["0"])[0])
             # Clamped rather than 404: the viewer's next/prev buttons are the
             # only caller, and an off-by-one there should not blank the screen.
             return max(0, min(index, workspace.page_count - 1))
 
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's API
+            workspace = documents.current()
             url = urlparse(self.path)
             try:
                 if url.path in ("/", "/index.html"):
@@ -339,6 +354,9 @@ def _handler(workspace: Workspace):
                         ),
                     }
                     self._send(200, json.dumps(payload).encode("utf-8"), "application/json")
+                elif url.path == "/api/documents":
+                    self._send(200, json.dumps(documents.listing()).encode("utf-8"),
+                               "application/json")
                 elif url.path == "/api/check":
                     body = {"findings": workspace.check(self._page_index(url.query))}
                     self._send(200, json.dumps(body).encode("utf-8"), "application/json")
@@ -354,14 +372,16 @@ def _handler(workspace: Workspace):
             the depth of the history, so the viewer never has to guess."""
             body = {
                 "element": json.loads(element.model_dump_json(exclude_none=True)),
-                "history": workspace.history(index),
+                "history": documents.current().history(index),
             }
             self._send(200, json.dumps(body).encode("utf-8"), "application/json")
 
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's API
+            workspace = documents.current()
             url = urlparse(self.path)
             routes = ("/api/edit", "/api/move", "/api/retype", "/api/suggest",
-                      "/api/undo", "/api/redo", "/api/export", "/api/import")
+                      "/api/undo", "/api/redo", "/api/export", "/api/import",
+                      "/api/open")
             if url.path not in routes:
                 self._send(404, b"not found", "text/plain")
                 return
@@ -378,7 +398,13 @@ def _handler(workspace: Workspace):
                 body = json.loads(self.rfile.read(length) or b"{}")
                 index = self._page_index(url.query)
 
-                if url.path == "/api/export":
+                if url.path == "/api/open":
+                    # Switching keeps the previous Workspace alive, so an
+                    # unexported correction is still there on the way back.
+                    documents.select(int(body.get("index", 0)))
+                    self._send(200, json.dumps(documents.listing()).encode(),
+                               "application/json")
+                elif url.path == "/api/export":
                     path = workspace.export(body.get("path"))
                     self._send(200, json.dumps({"path": str(path)}).encode(),
                                "application/json")
@@ -419,12 +445,67 @@ def _handler(workspace: Workspace):
     return Handler
 
 
+class DocumentSet:
+    """One PDF or a folder of them, with a `Workspace` per document.
+
+    A folder of scanned circulars is the shape the corpus actually arrives in,
+    and reviewing them one `python -m docyx.workspace` at a time throws the
+    session away between documents. So the set holds each `Workspace` open
+    once created: the per-page cache is the session's working copy, and
+    dropping it on a document switch would silently discard every correction
+    made there.
+
+    ponytail: that means memory grows with documents opened, roughly one
+    extracted Document each. Fine for the tens of files a person reviews in a
+    sitting; add an LRU that refuses to evict an edited document if someone
+    opens a folder of thousands.
+    """
+
+    def __init__(self, path: str, pipeline: Optional[DocyxPipeline] = None):
+        root = Path(path)
+        if root.is_dir():
+            # Sorted, so the order on screen is the order in the folder rather
+            # than whatever the filesystem happens to return.
+            self.paths = sorted(p for p in root.iterdir() if p.suffix.lower() == ".pdf")
+            if not self.paths:
+                raise ValueError(f"{root} holds no PDFs")
+        else:
+            self.paths = [root]
+        self._pipeline = pipeline
+        self._open: Dict[int, Workspace] = {}
+        self.index = 0
+
+    def current(self) -> Workspace:
+        if self.index not in self._open:
+            self._open[self.index] = Workspace(str(self.paths[self.index]), self._pipeline)
+        return self._open[self.index]
+
+    def select(self, index: int) -> Workspace:
+        self.index = max(0, min(index, len(self.paths) - 1))
+        return self.current()
+
+    def listing(self) -> Dict[str, Any]:
+        return {
+            "documents": [p.name for p in self.paths],
+            "current": self.index,
+            # The viewer hides the picker entirely for a single document, and
+            # needs to know that before it has anything else to go on.
+            "edited": sorted(i for i, w in self._open.items() if w.edited()),
+        }
+
+    def close(self) -> None:
+        for workspace in self._open.values():
+            workspace.close()
+
+
 def serve(pdf_path: str, port: int = 8000, open_browser: bool = True,
           pipeline: Optional[DocyxPipeline] = None) -> None:
-    workspace = Workspace(pdf_path, pipeline)
-    server = ThreadingHTTPServer(("127.0.0.1", port), _handler(workspace))
+    documents = DocumentSet(pdf_path, pipeline)
+    server = ThreadingHTTPServer(("127.0.0.1", port), _handler(documents))
     url = f"http://127.0.0.1:{port}/"
-    print(f"docyx workspace: {url}  ({workspace.page_count} pages)")
+    count = len(documents.paths)
+    where = f"{count} documents" if count > 1 else f"{documents.current().page_count} pages"
+    print(f"docyx workspace: {url}  ({where})")
     if open_browser:
         webbrowser.open(url)
     try:
@@ -433,4 +514,4 @@ def serve(pdf_path: str, port: int = 8000, open_browser: bool = True,
         print()
     finally:
         server.server_close()
-        workspace.close()
+        documents.close()

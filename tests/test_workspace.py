@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from docyx.core.geometry import BoundingBox
 from docyx.schema.models import ASSIGNABLE_TYPES
-from docyx.workspace.server import Workspace, serve
+from docyx.workspace.server import DocumentSet, Workspace, serve
 
 
 @pytest.fixture
@@ -708,3 +708,81 @@ def test_check_is_served_and_never_mutates(base_url):
     after = json.loads(get(f"{base_url}/api/page?page=0"))
 
     assert before["page"] == after["page"]
+
+
+# --- a folder of documents --------------------------------------------------
+
+
+@pytest.fixture
+def folder(tmp_path):
+    """Two PDFs whose text differs, so a switch that did not happen is visible."""
+    directory = tmp_path / "circulars"
+    directory.mkdir()
+    for name, body in (("b_second.pdf", "Second doc"), ("a_first.pdf", "First doc")):
+        doc = fitz.open()
+        doc.new_page().insert_text((72, 100), body, fontsize=11)
+        doc.save(str(directory / name))
+        doc.close()
+    (directory / "notes.txt").write_text("not a pdf")
+    return str(directory)
+
+
+def test_a_folder_lists_its_pdfs_in_name_order(folder):
+    documents = DocumentSet(folder)
+
+    assert documents.listing()["documents"] == ["a_first.pdf", "b_second.pdf"]
+    documents.close()
+
+
+def test_a_folder_with_no_pdfs_is_refused(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    with pytest.raises(ValueError):
+        DocumentSet(str(empty))
+
+
+def test_a_single_pdf_still_works_as_a_set_of_one(pdf):
+    documents = DocumentSet(pdf)
+
+    assert len(documents.listing()["documents"]) == 1
+    assert documents.current().page_count == 3
+    documents.close()
+
+
+def test_switching_documents_keeps_the_edits_made_in_each(folder):
+    """The per-page cache is the session's working copy, so dropping a
+    Workspace on a switch would silently discard every correction in it."""
+    documents = DocumentSet(folder)
+    first = documents.current()
+    element_id = first.page(0).pages[0].elements[0].id
+    first.edit(0, element_id, "corrected")
+
+    documents.select(1)
+    assert documents.current() is not first
+    assert documents.listing()["edited"] == [0]
+
+    documents.select(0)
+    assert documents.current() is first
+    assert first.find(0, element_id).text == "corrected"
+    documents.close()
+
+
+def test_an_out_of_range_document_is_clamped(folder):
+    documents = DocumentSet(folder)
+
+    documents.select(99)
+
+    assert documents.index == 1
+    documents.close()
+
+
+def test_an_unvisited_document_is_never_extracted_to_answer_edited(folder):
+    """A picker that cost a full extraction per document would make opening a
+    folder of scans unusable."""
+    documents = DocumentSet(folder)
+    documents.current()
+
+    assert documents.listing()["edited"] == []
+    assert set(documents._open) == {0}
+    documents.close()
