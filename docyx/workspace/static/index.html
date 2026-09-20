@@ -497,13 +497,84 @@ function blocks() {
       g.x1 = Math.max(g.x1, b.x + b.width); g.y1 = Math.max(g.y1, b.y + b.height);
     }
   }
-  for (const g of groups.values()) {
+  return summarise(merge([...groups.values()]));
+}
+
+function summarise(groups) {
+  for (const g of groups) {
     g.weakest = g.els.reduce((a, c) =>
       (TIER_RANK[tier(a)] ?? 9) <= (TIER_RANK[tier(c)] ?? 9) ? a : c);
     g.first = g.els.reduce((a, c) =>
       (a.reading_order ?? 1e9) <= (c.reading_order ?? 1e9) ? a : c);
   }
-  return [...groups.values()];
+  return groups;
+}
+
+/* ── block ids are paragraphs in Latin, and are not in Arabic ──────
+   The id-based grouping above was measured only on English. It does not hold:
+
+     arxiv_attention p2   27 lines ->  8 blocks    2 of 8 single-line
+     rfc2616 p12          52 lines -> 17 blocks    6 of 17
+     wiki_bn p5           35 lines ->  7 blocks    5 of 7
+     wiki_ar p6           57 lines -> 44 blocks   33 of 44
+
+   On the Arabic page the "resting view" that exists to stop boxing every line
+   was still drawing 44 boxes for a handful of paragraphs — it barely grouped
+   anything on exactly the scripts this project exists for. So a second pass
+   merges block groups a reader would call one paragraph.
+
+   GAP is measured, not chosen. Across those four pages the gap between two
+   lines of the same paragraph, over the median line height, has a median of
+   0.10 / -0.11 / -0.01 / -0.20 — at or below zero, because ascenders and
+   descenders make line boxes touch. Paragraph breaks live in the upper tail:
+   p90 of 1.44 / 0.62 / 0.04 / 0.86. Half a line height separates them.
+
+   The guards matter more than the threshold. Merging a heading into the
+   paragraph under it would be a worse defect than the 44 boxes, so a change of
+   type, direction or font size stops the merge — and a heading is a font size
+   change by definition. This is a VIEW grouping: no element is altered, the
+   ids stay positional, and `Lines` still shows every box. */
+const PARA = { GAP: 0.5, OVERLAP: 0.6, SIZE: 0.15 };
+
+function joinable(a, b, lh) {
+  const overlap = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  if (overlap < PARA.OVERLAP * Math.min(a.x1 - a.x0, b.x1 - b.x0)) return false;
+  const gap = b.y0 - a.y1;
+  // The floor rejects a group sitting on top of another — a footnote marker
+  // over body text is not the next line of it.
+  if (gap < -lh || gap > PARA.GAP * lh) return false;
+  const p = a.els[a.els.length - 1], q = b.els[0];
+  if (p.type !== q.type) return false;
+  if ((p.direction ?? null) !== (q.direction ?? null)) return false;
+  const ps = p.typography?.font_size, qs = q.typography?.font_size;
+  if (ps && qs && Math.abs(ps - qs) > PARA.SIZE * Math.max(ps, qs)) return false;
+  return true;
+}
+
+function merge(groups) {
+  if (groups.length < 2) return groups;
+  const heights = groups.flatMap(g => g.els.map(el => el.geometry.bbox.height))
+                        .sort((x, y) => x - y);
+  const lh = heights[heights.length >> 1];
+  if (!lh) return groups;
+
+  // Reading order first, so a merge can only ever join neighbours the page
+  // itself says are adjacent — geometry alone would bridge two columns.
+  const at = g => Math.min(...g.els.map(e => e.reading_order ?? 1e9));
+  const sorted = groups.slice().sort((a, b) => at(a) - at(b) || a.y0 - b.y0);
+
+  const out = [];
+  for (const g of sorted) {
+    const prev = out[out.length - 1];
+    if (prev && joinable(prev, g, lh)) {
+      prev.els = prev.els.concat(g.els);
+      prev.x0 = Math.min(prev.x0, g.x0); prev.y0 = Math.min(prev.y0, g.y0);
+      prev.x1 = Math.max(prev.x1, g.x1); prev.y1 = Math.max(prev.y1, g.y1);
+    } else {
+      out.push({ els: g.els.slice(), x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1 });
+    }
+  }
+  return out;
 }
 
 /* `4. section_header` — the same number the outline shows, so the two panes
@@ -694,6 +765,10 @@ function patch(el, updated) {
   el.geometry = updated.geometry;
   el.confidence = updated.confidence;
   el.provenance = updated.provenance;
+  // Children too: resizing a box re-reads its text and drops the style runs,
+  // which described the old box. Without this the canvas keeps drawing the old
+  // runs inside the new box and the inspector keeps counting them.
+  el.children = updated.children || [];
 }
 
 function setHistory(history) {

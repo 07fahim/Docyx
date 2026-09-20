@@ -700,7 +700,23 @@ Selecting an element scrims the page around it rather than tinting it, so the el
 
 **The category is editable**, through a control in the inspector rather than free text: the vocabulary travels with the page (`/api/page` carries `types`), so the viewer cannot offer a type the server would refuse. `Suggest` applies the typography proposals above, one `retype` each, so every one is separately undoable.
 
-**`Blocks` (`B`) is the resting view, and it is on by default.** Outlining every line buries the page it is drawn over — `rfc2616` p12 is 52 lines in 17 PyMuPDF blocks, `arxiv_attention` p2 is 27 in 8. **The block is already named in the element id** (`page13_b10_l0`), so grouping needs no layout model and no geometry guessing; it is a regex. At rest only block outlines are drawn, and a line's own box appears when you point at it or select it, which is when its exact edges are what you want.
+**`Blocks` (`B`) is the resting view, and it is on by default.** Outlining every line buries the page it is drawn over — `rfc2616` p12 is 52 lines in 17 PyMuPDF blocks, `arxiv_attention` p2 is 27 in 8. **The block is already named in the element id** (`page13_b10_l0`), so grouping starts as a regex with no layout model. At rest only block outlines are drawn, and a line's own box appears when you point at it or select it, which is when its exact edges are what you want.
+
+**"It is a regex" was measured only on English, and it is false on Arabic.** A PyMuPDF block is a paragraph in Latin and very nearly a line in Arabic:
+
+| page | lines | id-grouped blocks | single-line blocks |
+|---|---|---|---|
+| `arxiv_attention` p2 | 27 | 8 | 2 of 8 |
+| `rfc2616` p12 | 52 | 17 | 6 of 17 |
+| `wiki_bn` p5 | 35 | 7 | 5 of 7 |
+| **`wiki_ar` p6** | **57** | **44** | **33 of 44** |
+
+So the view whose whole purpose is *not boxing every line* was still drawing 44 boxes for a handful of paragraphs — failing on exactly the scripts this project exists for, and invisible while the resting view was only ever checked in English. A second pass now merges block groups a reader would call one paragraph: **44 → 11 on `wiki_ar` p6**, against 22 → 17, 9 → 9 and 24 → 23 on English pages. Conservative where the regex already worked, decisive where it did not, which is the shape a fix for this should have.
+
+- **The gap threshold is measured.** Over the median line height, the gap between two lines of one paragraph has a median of 0.10 / −0.11 / −0.01 / −0.20 across those four pages — at or below zero, because ascenders and descenders make line boxes touch. Paragraph breaks sit in the upper tail, p90 of 1.44 / 0.62 / 0.04 / 0.86. Half a line height separates them.
+- **The guards matter more than the threshold**, because merging a heading into the paragraph beneath it would be a worse defect than the 44 boxes. A change of `type`, `direction` or font size stops a merge — and a heading *is* a font-size change. Verified on `wiki_ar` p6: every Arabic section heading keeps its own box.
+- **Merging follows reading order, not geometry alone**, so a merge can only join neighbours the page itself calls adjacent. Geometry alone would bridge two columns.
+- **It is a view grouping.** No element changes, ids stay positional, the schema is untouched, and `Lines` still shows every box.
 
 A block takes the colour of its **weakest** line: a paragraph holding one `inferred` line must not read as `exact`. `Lines` restores per-line boxes for close work.
 
@@ -717,6 +733,14 @@ A block takes the colour of its **weakest** line: a paragraph holding one `infer
 - **Bbox editing (§10) is still absent**, and needs the `original_geometry` decision before it lands.
 
 **Bbox editing** is `POST /api/move` → `Element.edit_geometry()`, the geometry twin of `edit_text()`. Drag the box to move it, the eight handles to resize. Corners are normalised rather than width/height clamped, so dragging an edge past its opposite flips the box instead of producing a negative size.
+
+**Resizing a box re-reads the text inside it, and for three releases it did not.** A box is a claim about *which glyphs these are*, so moving one without re-reading leaves the element asserting a region and a string that came from a different region — grow a line box to take in the word the extractor clipped and the word stayed out of the text, which is the entire reason anyone drags the handle. `NativeTextExtractor.text_in()` reads the region (in 150-DPI reference pixels, converted once inside `docyx/pdf/`, so PyMuPDF stays contained) and `move()` applies it through `edit_text`.
+
+- **Both mutations sit under one `_record`**, so the gesture is one undo. A person dragged a handle once.
+- **`original_text` still holds the machine's own claim** from before the drag, because the re-read goes through `edit_text` rather than assignment — and `edit_text`'s first-edit-only guard means a second drag cannot overwrite it with the first drag's result. Pinned by `test_a_re_read_box_keeps_the_original_from_the_FIRST_drag`.
+- **Native text only.** An OCR line's text is in no text layer, so re-reading it would silently blank it; recognising the new crop is the real answer there and needs the detector. Pinned by `test_a_non_native_element_is_never_re_read_from_the_text_layer`.
+- **Style-run children are dropped**, because they described the old box. Left alone they are a line whose own children contradict it. `patch()` in the viewer copies `children` for the same reason — without it the canvas kept drawing the old runs inside the new box.
+- **A box dragged onto nothing now holds nothing**, which is what the region says. `test_check_reports_a_defect_a_human_edit_created` gained `EMPTY_TEXT` beside `ZERO_SIZE_BOX` when this landed — the check report finally seeing a state it was written for and could not reach, because the text still looked fine.
 
 `Provenance.original_geometry` is the reason for **schema v1.7**. It is guarded *separately* from `original_text`: the obvious implementation gates both on `modified_by_user`, and then whichever edit came second records nothing — correcting the text of a box you already moved would silently discard the geometry the machine proposed. Pinned by `test_a_text_edit_never_overwrites_a_geometry_original`. The same bug existed in `edit_text` alone and is now fixed: its guard is `original_text is None`, with `or ""` so an element that had no text still records that it had none rather than letting the *second* edit claim the first correction as the original.
 
