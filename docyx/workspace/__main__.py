@@ -16,7 +16,14 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--layout", action="store_true", help="detect layout regions")
-    parser.add_argument("--tables", action="store_true", help="detect table structure")
+    parser.add_argument(
+        "--tables",
+        action="store_true",
+        help=(
+            "detect tables. Uses line geometry, which needs nothing extra; "
+            "Table Transformer instead when the model stack is installed"
+        ),
+    )
     parser.add_argument("--ocr", metavar="LANG", type=ocr_language,
                         help="recognise gate-failed pages, e.g. ben, ara, ben+eng")
     args = parser.parse_args(argv)
@@ -33,10 +40,18 @@ def main(argv=None) -> int:
 
                 layout = LayoutAnalyzer(detector=DocLayNetDetector())
             if args.tables:
-                from docyx.analysis.detectors.table_transformer import TableTransformerDetector
-                from docyx.analysis.tables import TableAnalyzer
+                # Same contract as the main CLI: the model is preferred only
+                # because it had the page image, and its absence is not an
+                # error -- the geometry pass covers it.
+                try:
+                    from docyx.analysis.detectors.table_transformer import (
+                        TableTransformerDetector,
+                    )
+                    from docyx.analysis.tables import TableAnalyzer
 
-                tables = TableAnalyzer(detector=TableTransformerDetector())
+                    tables = TableAnalyzer(detector=TableTransformerDetector())
+                except ImportError:
+                    pass
             if args.ocr:
                 from docyx.analysis.detectors.tesseract import TesseractDetector
                 from docyx.analysis.ocr import OCRAnalyzer
@@ -54,7 +69,10 @@ def main(argv=None) -> int:
         except ImportError as exc:
             parser.error(str(exc))
         pipeline = DocyxPipeline(
-            layout_analyzer=layout, table_analyzer=tables, ocr_analyzer=ocr
+            layout_analyzer=layout,
+            table_analyzer=tables,
+            ocr_analyzer=ocr,
+            table_geometry=args.tables,
         )
 
     try:
