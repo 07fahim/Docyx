@@ -202,10 +202,31 @@ to the first test's `Workspace`. Invisible while the tests were read-only;
 wrong the moment one of them edits. A port per test now.
 
 Remaining, and stated plainly: **edits live in the process.** Export is the
-only way out — there is no resume, because loading a sidecar back means
-matching elements by `id` across a fresh extraction and nothing guarantees
-those are stable. That is the same problem `.corpus/truth/` checksums exist
-to catch, and it is the real blocker on corpus expansion.
+only way out — there is no resume.
+
+**Measured** (`scripts/measure_id_stability.py`), because "ids might not be
+stable" was a worry rather than a finding. Ids are positional, so they are
+stable against everything the runtime varies — 1092 elements over 4
+documents, 0 collisions, 0 moved across repeat runs, across `pages=[n]` vs a
+whole-document run, and with layout/table/visual detectors switched on.
+
+`--against REF` answers the question the other four cannot:
+
+```
+4b9b461 -> HEAD
+  arxiv_attention.pdf   127 -> 80   kept  22  lost 105  new  58  moved  1
+  wiki_ar.pdf           178 -> 200  kept 151  lost  27  new  49  moved 28
+```
+
+The span-to-line change orphaned **83%** of one page's ids, and 29 ids
+survived while naming *different content* — the failure that silently
+reattaches a correction to the wrong line. One is traceable to the
+"blank spans must not be skipped" fix.
+
+**Verdict: resume is safe within a version, unsafe across one.** It needs a
+content hash beside the id (match → reattach, differ → flag, absent →
+orphan), which is the discipline `.corpus/truth/` already uses. Run
+`--against` before shipping any extraction change.
 
 ## Decisions settled
 

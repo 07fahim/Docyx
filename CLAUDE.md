@@ -380,7 +380,28 @@ Selecting an element scrims the page around it rather than tinting it, so the el
 - **"Errors block export" means *schema* errors.** A `failed` page does not block: partial results are the documented contract, and refusing to export 199 good pages over one bad one would invert it.
 - **Every page is exported, not just the visited ones**, so editing page 1 of a 200-page report still costs a full extraction run at export time.
 
-**Edits live in the process.** The per-page cache is the session's working copy; export is the only way out. There is no resume: loading a sidecar back would have to match elements by `id` across a fresh extraction, and nothing guarantees those are stable — the same problem `.corpus/truth/` checksums exist to catch.
+**Edits live in the process.** The per-page cache is the session's working copy; export is the only way out. There is no resume — and `scripts/measure_id_stability.py` now says exactly why, rather than leaving it a worry.
+
+**Element ids are positional** (`page1_b0_l6` is block 0, line 6 of PyMuPDF's enumeration), which makes them stable against everything the *runtime* varies and fragile against everything the *code* does. Measured over 1092 elements across 4 documents:
+
+| | result |
+|---|---|
+| unique within a page | 0 collisions |
+| deterministic across runs | 0 lost, 0 moved |
+| `pages=[n]` vs whole-document run | 0 lost, 0 moved |
+| layout + table + visual detectors added | 0 native text ids moved |
+
+So a same-version round trip is safe, and so is an edit made in the viewer reattached to a CLI batch export. Then `--against REF` builds a worktree at an old commit and diffs:
+
+```
+4b9b461 -> HEAD
+  arxiv_attention.pdf   127 -> 80   ids   kept  22  lost 105  new  58  moved  1
+  wiki_ar.pdf           178 -> 200  ids   kept 151  lost  27  new  49  moved 28
+```
+
+The span-to-line granularity change **orphaned 83% of one page's ids**, and — worse — 29 ids *survived while naming different content*. One of those is traceable to the "blank spans must not be skipped" fix: `page1_b16_l0_s1` went from `Equal contribution.Listing order` to `Equal contribution. Listing order`. A resume keyed on id alone would have silently reattached a human correction to text that had changed underneath it.
+
+**So resume needs a content fingerprint beside the id, not the id alone** — the same checksum discipline `.corpus/truth/` already uses, with three outcomes: hash matches → reattach; id present but hash differs → flag, never auto-apply; id absent → report orphaned. Run `--against` before shipping any extraction change to see how much it would orphan.
 
 No revert button, deliberately: `original_text` makes one trivial, but re-applying it through `edit_text()` lands in exactly the state undo exists to avoid. Undo is the revert.
 
