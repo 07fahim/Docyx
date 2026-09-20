@@ -542,7 +542,7 @@ So `analysis/headings.py` plus the manual control cover the same ground at a fra
 ### Known gaps
 
 - **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **One** real scan is now measured (CER 0.075, see above) — one page, one producer, one transcriber. Everything else is flattened born-digital, so skew and show-through remain largely unrepresented.
-- **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative.
+- **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative. Tables additionally have a model-free path (**Tables with no model**); layout does not, and the measured failure of `DocLayNetDetector` on captions says a model is not obviously the answer there either.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is unused, and the obvious producer was measured and declined — see below.
 
@@ -683,7 +683,7 @@ No revert button, deliberately: `original_text` makes one trivial, but re-applyi
 
 **Phase 6's `visual_inference` criterion was measured and struck.** See **Typography from pixels** below; the roadmap now asks only that `ocr` become active, which it is.
 
-**Every capability now has a scorer.** Reading order (8 pages), semantic roles (5), OCR (4 flattened + 1 real scan), table structure (3 tables). What is left is *more* evidence rather than the first of it — and one open result: the table model does not beat naive geometry clustering, which is an argument for building that heuristic rather than for depending on weights. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
+**Every capability now has a scorer.** Reading order (8 pages), semantic roles (5), OCR (4 flattened + 1 real scan), table structure (3 tables) and table *region* detection (9 negative pages). What is left is *more* evidence rather than the first of it, and the shape of the remaining risk is known: each widening of the table-region negative set produced a new false-positive class, so that number is the one to grow next. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
 
 - `universal_page_document_metadata_extraction_plan_v6.md` — architecture, pipeline, schema
 - `universal_page_metadata_extraction_tool_uiux_plan_v3.md` — the phase-5 workspace UI

@@ -15,10 +15,20 @@ export, resume, a page check report, and a folder of PDFs as one session.
 structure (3 tables, `scripts/measure_tables.py`). What is left is *more*
 evidence rather than the first of it.
 
-One open result: **the Table Transformer does not beat naive geometry
-clustering** on the three labelled tables (mean adj F1 0.731 vs 0.766). That is
-an argument for building a model-free table heuristic — `TableAnalyzer._heuristic`
-still returns `[]` — rather than for depending on weights.
+That measurement was acted on. It said the Table Transformer was not buying
+structure, only region-finding, so `docyx/analysis/table_geometry.py` now does
+both from text-line positions — **no weights, 7 ms/page, and it beats the
+model** (adj F1 0.749 vs 0.731), scoring 1.000 with all 72 cells on
+`arxiv_gpt3` p7 where the model drops the header row.
+
+**Off by default** (`--tables`). Finding the region is the whole difficulty:
+every time the adversarial page list grew, a new false-positive class appeared
+— title-page author grids, running heads, figure labels, then displayed
+equations, found only by running whole documents instead of six pages. Now
+1.00 coverage on three labelled tables and zero false tables on nine pages
+that have none (`scripts/measure_table_regions.py`), but assume more classes
+remain unfound. Three labelled tables is enough to offer this and not enough
+to change what every existing caller gets.
 
 **Truth files live one directory per scorer**: `.corpus/truth/*.json` is reading
 order, `truth/types/`, `truth/tables/`, `truth/ocr/`. Each scorer globs its own
