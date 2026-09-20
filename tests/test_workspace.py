@@ -834,3 +834,61 @@ def test_a_missing_path_is_a_clean_error_not_a_traceback(capsys):
 
     assert exc.value.code == 2
     assert "no such file or folder" in capsys.readouterr().err
+
+
+# --- concurrency ------------------------------------------------------------
+# The server is threaded and the per-page cache is the session's working copy,
+# so populating it is a read-modify-write that two requests can race.
+
+
+def test_concurrent_edits_to_an_uncached_page_are_not_lost(pdf):
+    """The worst shape a bug can have here: accepted, answered with the
+    correction, and silently gone.
+
+    Without the lock each thread built its own Document, one won the cache slot
+    and the rest were discarded — so an edit applied through a loser never
+    reached the page the user then looked at. Reproduced 6 times out of 6.
+    """
+    workspace = Workspace(pdf)
+    element_id = workspace.page(0).pages[0].elements[0].id
+    workspace._pages.clear()
+
+    applied = []
+
+    def edit(n):
+        applied.append(workspace.edit(0, element_id, f"correction{n}").text)
+
+    threads = [threading.Thread(target=edit, args=(n,)) for n in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # Every accepted edit landed on the one page the cache holds.
+    assert workspace.find(0, element_id).text in applied
+    assert len(set(applied)) == len(applied)
+    assert workspace.history(0)["undo"] == 6
+    workspace.close()
+
+
+def test_one_uncached_page_is_extracted_once(pdf):
+    """Six concurrent requests used to run six full extractions — which with a
+    layout or OCR model is six times the model cost for one page."""
+    workspace = Workspace(pdf)
+    runs = []
+    real = workspace.pipeline.process
+
+    def counting(*args, **kwargs):
+        runs.append(1)
+        return real(*args, **kwargs)
+
+    workspace.pipeline.process = counting
+
+    threads = [threading.Thread(target=lambda: workspace.page(1)) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(runs) == 1
+    workspace.close()

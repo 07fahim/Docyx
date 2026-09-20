@@ -15,6 +15,7 @@ concurrency arrive — the routes are thin on purpose.
 
 import json
 import socket
+import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -100,13 +101,31 @@ class Workspace:
         self._pages: dict = {}
         self._undo: Dict[int, List] = {}
         self._redo: Dict[int, List] = {}
+        # The server is threaded and this cache is the session's working copy,
+        # so populating it is a read-modify-write that two requests can race.
+        # Reentrant because every mutator calls find() -> page() beneath itself.
+        #
+        # ponytail: one lock for the whole Workspace. Extraction is seconds with
+        # a model, so if page loads ever need to overlap, make it per index --
+        # but the correctness argument below is what the lock is really for.
+        self._lock = threading.RLock()
 
     def page(self, index: int) -> Document:
-        if index not in self._pages:
-            self._pages[index] = self.pipeline.process(
-                self.pdf_path, Path(self.pdf_path).stem, pages=[index]
-            )
-        return self._pages[index]
+        """Extract a page, or return the cached copy.
+
+        Locked, and not merely to avoid duplicate work. Without it, two
+        concurrent requests for an UNCACHED page each build their own
+        `Document`; one wins the dict slot and the other is discarded -- so an
+        edit applied through the loser was accepted, answered 200 with the
+        correction, and silently never reached the page. Reproduced 6 times out
+        of 6 before this lock existed.
+        """
+        with self._lock:
+            if index not in self._pages:
+                self._pages[index] = self.pipeline.process(
+                    self.pdf_path, Path(self.pdf_path).stem, pages=[index]
+                )
+            return self._pages[index]
 
     def image(self, index: int) -> bytes:
         return self.renderer.render_page(index)
@@ -123,15 +142,18 @@ class Workspace:
         The edit lands on the cached `Document`, so it survives navigating
         away and back — the cache is the session's working copy.
         """
-        return self._record(index, self.find(index, element_id)).edit_text(text)
+        with self._lock:
+            return self._record(index, self.find(index, element_id)).edit_text(text)
 
     def move(self, index: int, element_id: str, bbox: BoundingBox) -> Element:
         """Correct an element's position or size through `edit_geometry` (§10)."""
-        return self._record(index, self.find(index, element_id)).edit_geometry(bbox)
+        with self._lock:
+            return self._record(index, self.find(index, element_id)).edit_geometry(bbox)
 
     def retype(self, index: int, element_id: str, type_: str) -> Element:
         """Correct the block's category through `edit_type` (§8)."""
-        return self._record(index, self.find(index, element_id)).edit_type(type_)
+        with self._lock:
+            return self._record(index, self.find(index, element_id)).edit_type(type_)
 
     def suggest_headings(self, index: int) -> List[Dict[str, str]]:
         """Propose heading categories from font size, without applying them.
@@ -160,12 +182,15 @@ class Workspace:
         return self._step(self._redo, self._undo, index)
 
     def _step(self, source: Dict, sink: Dict, index: int) -> Element:
-        stack = source.get(index) or []
-        if not stack:
-            raise IndexError("nothing to undo" if source is self._undo else "nothing to redo")
-        element, state = stack.pop()
-        sink.setdefault(index, []).append((element, _snapshot(element)))
-        return _restore(element, state)
+        with self._lock:
+            stack = source.get(index) or []
+            if not stack:
+                raise IndexError(
+                    "nothing to undo" if source is self._undo else "nothing to redo"
+                )
+            element, state = stack.pop()
+            sink.setdefault(index, []).append((element, _snapshot(element)))
+            return _restore(element, state)
 
     def history(self, index: int) -> Dict[str, int]:
         return {"undo": len(self._undo.get(index) or []),

@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (320 tests, ~41s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (322 tests, ~38s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -650,6 +650,10 @@ A block takes the colour of its **weakest** line: a paragraph holding one `infer
 - **Validate, then write.** A file that fails its own schema must not exist, so `Document.model_validate` runs first and a failure is `422` with nothing written. Pydantic does not validate on assignment, so this is a real check rather than a tautology.
 - **"Errors block export" means *schema* errors.** A `failed` page does not block: partial results are the documented contract, and refusing to export 199 good pages over one bad one would invert it.
 - **Every page is exported, not just the visited ones**, so editing page 1 of a 200-page report still costs a full extraction run at export time.
+
+**The per-page cache is locked, and not for speed.** `ThreadingHTTPServer` serves requests concurrently and this cache *is* the session's working copy, so populating it is a read-modify-write two requests can race. Without the lock, two concurrent requests for an **uncached** page each built their own `Document`; one won the dict slot and the rest were discarded — so an edit applied through a loser was accepted, **answered `200` with the correction in it, and silently never reached the page**. Reproduced 6 trials out of 6. It also ran six full extractions for one page, which with a layout or OCR model is six times the model cost.
+
+The lock is reentrant because every mutator calls `find()` → `page()` beneath itself, and it wraps the mutators too: record-then-apply is its own read-modify-write. Pinned by `test_concurrent_edits_to_an_uncached_page_are_not_lost`.
 
 **Edits live in the process.** The per-page cache is the session's working copy; export is the only way out. There is no resume — and `scripts/measure_id_stability.py` now says exactly why, rather than leaving it a worry.
 
