@@ -1,0 +1,17 @@
+{
+  "document": "nasa_budget.pdf",
+  "page": 88,
+  "checksum": "af8c97f4a674",
+  "notes": "The hard case, and the reason this harness exists. Two rows by five columns, but every cell in the data row wraps over up to ten lines and the lines of different columns interleave by y -- which is exactly why CLAUDE.md records this page as reading order's known failure. Getting the structure right here means knowing where the cell boundaries are, which is the claim a table model makes. Lines 0, 1, 2 are the running head and page heading and line 34 is the page number; none belongs to a cell.",
+  "header_rows": 1,
+  "grid": [
+    [[4], [5], [3, 8], [6], [7]],
+    [
+      [11, 15, 20, 25, 29, 31],
+      [13, 17, 22, 27],
+      [18, 23],
+      [9, 10, 12, 14, 19, 24, 28, 30, 32, 33],
+      [16, 21, 26]
+    ]
+  ]
+}

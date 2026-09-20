@@ -1,0 +1,14 @@
+{
+  "document": "arxiv_attention.pdf",
+  "page": 5,
+  "checksum": "a765a975dafc",
+  "notes": "Table 1, layer complexity: 5 rows by 4 columns. The middle case between the other two -- the body cells are single lines like arxiv_gpt3, but the header cell 'Sequential Operations' wraps over lines 5 and 7, which is where the NASA table fails. Same off-baseline trap as arxiv_gpt3: the three right-hand columns set their values a few pixels ABOVE the row's label, so line 8 belongs with the Self-Attention row and not the header. Lines 0-2 are the caption, which sits above this table, and 24-25 are the next section heading.",
+  "header_rows": 1,
+  "grid": [
+    [[3], [4], [5, 7], [6]],
+    [[11], [8], [9], [10]],
+    [[15], [12], [13], [14]],
+    [[19], [16], [17], [18]],
+    [[23], [20], [21], [22]]
+  ]
+}

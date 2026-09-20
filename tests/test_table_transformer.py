@@ -206,3 +206,90 @@ def test_cells_with_no_text_beneath_them_stay_empty():
     _populate_cell_text([table])
 
     assert table.children[0].text is None
+
+
+# --- the structure scorer's own metric --------------------------------------
+# Tested without weights: the metric is arithmetic over line sets, and a
+# scorer nobody can check is worth no more than the score it prints.
+
+
+def _grid(rows):
+    """{(row, column): frozenset} from a list-of-lists of line-index lists."""
+    return {(r, c): frozenset(cell)
+            for r, row in enumerate(rows)
+            for c, cell in enumerate(row) if cell}
+
+
+def test_a_perfect_grid_scores_one():
+    from scripts.measure_tables import score
+
+    truth = _grid([[[0], [1]], [[2], [3]]])
+
+    cell, adjacency = score(truth, dict(truth))
+
+    assert cell == (1.0, 1.0, 1.0)
+    assert adjacency == (1.0, 1.0, 1.0)
+
+
+def test_a_missing_header_row_costs_that_row_and_not_the_whole_table():
+    """The Table Transformer drops the header row on every corpus table, and a
+    metric that renumbered everything below it would call a one-row error a
+    total failure."""
+    from scripts.measure_tables import score
+
+    truth = _grid([[[0], [1]], [[2], [3]], [[4], [5]]])
+    predicted = _grid([[[2], [3]], [[4], [5]]])
+
+    cell, adjacency = score(truth, predicted)
+
+    assert cell[0] == 1.0                 # nothing it reported was wrong
+    assert cell[1] == pytest.approx(4 / 6)
+    assert adjacency[0] == 1.0            # and the rows it kept are still adjacent
+    assert adjacency[2] > 0.6
+
+
+def test_a_transposed_table_keeps_its_cells_and_loses_its_structure():
+    """Why both numbers are quoted. Every cell is individually correct, so
+    `cell` is perfect; nothing sits beside what it used to, so `adj` is zero."""
+    from scripts.measure_tables import score
+
+    truth = _grid([[[0], [1]], [[2], [3]]])
+    transposed = _grid([[[0], [2]], [[1], [3]]])
+
+    cell, adjacency = score(truth, transposed)
+
+    assert cell == (1.0, 1.0, 1.0)
+    assert adjacency[2] == 0.0
+
+
+def test_a_cell_split_in_two_is_penalised_on_both_sides():
+    """The NASA failure: a multi-line cell broken up. It loses the truth cell
+    (recall) and adds two that match nothing (precision)."""
+    from scripts.measure_tables import score
+
+    truth = _grid([[[0, 1], [2]]])
+    split = _grid([[[0], [2]], [[1], None]])
+
+    cell, _ = score(truth, split)
+
+    assert cell[0] < 1.0
+    assert cell[1] < 1.0
+
+
+def test_geometry_baseline_recovers_a_clean_grid():
+    """The baseline has to be able to win, or the comparison proves nothing --
+    and on a clean grid it does win, which is the corpus result."""
+    from docyx.core.geometry import BoundingBox, Geometry
+    from scripts.measure_tables import geometry_grid
+
+    class Line:
+        def __init__(self, x, y):
+            self.geometry = Geometry(bbox=BoundingBox(x=x, y=y, width=30, height=10))
+
+    lines = [Line(x, y) for y in (100, 130) for x in (50, 200)]
+
+    grid = geometry_grid(lines, set(range(4)))
+
+    assert sorted(grid) == [(0, 0), (0, 1), (1, 0), (1, 1)]
+    assert grid[(0, 0)] == frozenset({0})
+    assert grid[(1, 1)] == frozenset({3})

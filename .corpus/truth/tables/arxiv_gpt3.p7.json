@@ -1,0 +1,18 @@
+{
+  "document": "arxiv_gpt3.pdf",
+  "page": 7,
+  "checksum": "66164abf91df",
+  "notes": "Table 2.1, the GPT-3 model size table: 9 rows by 8 columns, every cell exactly one line, no spans. The easy case, and it is here as the control -- a table harness that cannot score this cannot be trusted on the hard one. Note the Learning Rate column sets its value slightly ABOVE its row's baseline, so line 8 belongs with row 1 and not with the header; reading it by y alone puts the whole column off by one. Line 72 is the caption and belongs to no cell.",
+  "header_rows": 1,
+  "grid": [
+    [[5], [0], [1], [2], [3], [4], [6], [7]],
+    [[9], [10], [11], [12], [13], [14], [15], [8]],
+    [[17], [18], [19], [20], [21], [22], [23], [16]],
+    [[25], [26], [27], [28], [29], [30], [31], [24]],
+    [[33], [34], [35], [36], [37], [38], [39], [32]],
+    [[41], [42], [43], [44], [45], [46], [47], [40]],
+    [[49], [50], [51], [52], [53], [54], [55], [48]],
+    [[57], [58], [59], [60], [61], [62], [63], [56]],
+    [[65], [66], [67], [68], [69], [70], [71], [64]]
+  ]
+}

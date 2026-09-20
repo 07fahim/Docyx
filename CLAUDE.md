@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (297 tests, ~33s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (302 tests, ~35s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -101,6 +101,7 @@ Graded against hand-labelled ground truth in `.corpus/truth/`, not against anoth
 PYTHONPATH=. .venv/Scripts/python.exe scripts/dump_lines.py .corpus/x.pdf 3   # labelling worksheet
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_reading_order.py        # tau + adjacency
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_types.py               # semantic roles, per class
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_tables.py              # table structure (needs models)
 PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
@@ -298,6 +299,37 @@ DocyxPipeline(table_analyzer=TableAnalyzer(detector=TableTransformerDetector()))
 **Table Transformer is an object detector, not OCR** — it emits row/column/table *boxes* from the page image and never reads a character from pixels (§2.2). Cell text is joined from the native layer by position in `_populate_cell_text`, so it stays `1.0 / exact` — the table model never contributes `ocr` provenance. Verified on a real IRS form: 731 text elements, all `native_pdf`.
 
 The stack is optional by design — core stays at 4 light dependencies (§24). Core throughput is **0.221 s/page median** (`scripts/measure_speed.py`), with stub detectors; the model stack costs far more and has not been timed.
+
+**`HF_HOME` must not be quoted.** A value of `"D:\caches\huggingface"` including the literal quotes makes every detector raise `OSError: [Errno 22]` deep inside `huggingface_hub`, which `_safely` turns into a `STAGE_FAILED` warning and zero tables — so the stack looks like it silently detects nothing rather than like it is misconfigured. Cost an hour once; check this first if a detector yields nothing.
+
+### The table structure scorer
+
+`TableAnalyzer` shipped a working Table Transformer through the `detector` seam and nothing could say whether its grid was right — the last capability in the repo still in the trap the reading-order harness exists to close.
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_tables.py
+```
+
+**A cell is a set of text lines, not a string.** Cell text is joined from native lines that fall inside the cell box, so "did every line land in the right cell" is what decides whether a table is right — and it is what a text comparison cannot measure honestly, because a multi-line cell differs from its reference by spacing and join order long before it differs in content. Truth records line *indices* from `dump_lines.py` and shares its checksum, so an extraction change invalidates these and the reading-order files together.
+
+Two numbers: `cell` (a predicted cell counts only when its line set exactly equals a truth cell's) and `adj` (the ICDAR-style adjacency metric — each truth cell's nearest occupied neighbour right and below). Quote both. `adj` relations are keyed on *content*, not grid coordinates, so a missed header row is not punished twice by renumbering everything under it.
+
+| table | shape | cov | cell F1 | adj F1 | naive adj F1 |
+|---|---|---|---|---|---|
+| `arxiv_attention` p5 | 5×4 | 0.76 | 0.865 | **0.857** | 0.852 |
+| `arxiv_gpt3` p7 | 9×8 | 0.89 | 0.941 | 0.937 | **1.000** |
+| `nasa_budget` p88 | 2×5 | 0.94 | 0.640 | 0.400 | **0.444** |
+| mean | | | 0.815 | **0.731** | **0.766** |
+
+**The headline: the model does not beat naive geometry.** The baseline clusters line positions by x and y — no model, no weights, no download — and matches or beats Table Transformer on all three tables. Read that with its caveat, which is why `cov` is in the table: the baseline is *handed* the table's line set and the model has to find it. `cov` is the share of labelled table lines the model put in any cell, and it separates the two failures:
+
+- **`arxiv_gpt3` p7 is a region failure, not a structure failure.** Cell precision is 1.000 — every cell it reported is exactly right. Its single error is that the header row is not inside the detected table, which is precisely the information the baseline gets free. Do not read its 0.937 as the model being worse at structure.
+- **`nasa_budget` p88 is a real structure failure.** `cov` 0.94, yet cell precision 0.533: the model emitted **two identical header rows**, and clipped the last line off a ten-line cell. Nothing about the region explains that.
+- **Losing the header row happens on all three** (`cov` 0.76 / 0.89 / 0.94). It is the one defect worth fixing.
+
+**The baseline must be able to win, or the comparison proves nothing.** The first version used "one cell per line, one column", which scored 0.005 and could never have flagged anything — the same vacuous-fixture trap that `bad photocopy` exists to prevent in the OCR sweep. `arxiv_attention` p5 is where the model does edge ahead (0.857 vs 0.852), so the flag demonstrably both fires and doesn't.
+
+**3 tables is an instrument, not a benchmark**, and one of the three is deliberately the hardest page in the corpus. The metric itself is unit-tested without weights in [tests/test_table_transformer.py](tests/test_table_transformer.py) — a scorer nobody can check is worth no more than the score it prints.
 
 Detectors may declare an `engine` attribute; analyzers report it as `provenance.engine` instead of their own heuristic name. Attributing a model's output to the heuristic it replaced would make §26.11's swappability claim unverifiable.
 
@@ -611,7 +643,7 @@ No revert button, deliberately: `original_text` makes one trivial, but re-applyi
 
 **Phase 6's `visual_inference` criterion was measured and struck.** See **Typography from pixels** below; the roadmap now asks only that `ocr` become active, which it is.
 
-**The remaining debt is evidence, not features.** Reading-order truth is 8 pages and type truth is 5; one real scan is measured; and **table structure still has no scorer at all** — `TableAnalyzer` ships a working Table Transformer detector and nothing can say whether its grid is right. That is the trap the reading-order and type harnesses exist to avoid, and it is now the only place left in the repo that is still in it. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
+**Every capability now has a scorer.** Reading order (8 pages), semantic roles (5), OCR (4 flattened + 1 real scan), table structure (3 tables). What is left is *more* evidence rather than the first of it — and one open result: the table model does not beat naive geometry clustering, which is an argument for building that heuristic rather than for depending on weights. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
 
 - `universal_page_document_metadata_extraction_plan_v6.md` — architecture, pipeline, schema
 - `universal_page_metadata_extraction_tool_uiux_plan_v3.md` — the phase-5 workspace UI
