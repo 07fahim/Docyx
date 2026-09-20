@@ -14,6 +14,7 @@ concurrency arrive — the routes are thin on purpose.
 """
 
 import json
+import socket
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -498,8 +499,25 @@ class DocumentSet:
             workspace.close()
 
 
+def _port_is_taken(port: int) -> bool:
+    """Is something already serving here?
+
+    `ThreadingHTTPServer` sets SO_REUSEADDR, which on Windows lets a second
+    bind SUCCEED on a port that is already in use. The second server then sits
+    in serve_forever answering nothing while the first keeps the connections --
+    so starting a workspace twice looked like it worked and showed the other
+    document. Connecting is the portable check: a socket merely in TIME_WAIT
+    does not accept, so this does not break an immediate restart.
+    """
+    with socket.socket() as probe:
+        probe.settimeout(0.3)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
 def serve(pdf_path: str, port: int = 8000, open_browser: bool = True,
           pipeline: Optional[DocyxPipeline] = None) -> None:
+    if _port_is_taken(port):
+        raise OSError(f"port {port} is already serving; use --port to pick another")
     documents = DocumentSet(pdf_path, pipeline)
     server = ThreadingHTTPServer(("127.0.0.1", port), _handler(documents))
     url = f"http://127.0.0.1:{port}/"

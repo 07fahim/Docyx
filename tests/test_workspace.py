@@ -5,6 +5,7 @@ JavaScript reads specific fields, and a schema change that drops one would
 otherwise only show up as a blank screen.
 """
 
+import argparse
 import itertools
 import json
 import threading
@@ -786,3 +787,50 @@ def test_an_unvisited_document_is_never_extracted_to_answer_edited(folder):
     assert documents.listing()["edited"] == []
     assert set(documents._open) == {0}
     documents.close()
+
+
+# --- the workspace entry point ----------------------------------------------
+
+
+def test_a_second_workspace_on_a_busy_port_is_refused(base_url):
+    """ThreadingHTTPServer sets SO_REUSEADDR, which on Windows lets the second
+    bind SUCCEED. The second server then answers nothing while the first keeps
+    the connections, so starting it twice looked like it worked and showed the
+    other document."""
+    from docyx.workspace.server import serve
+
+    port = int(base_url.rsplit(":", 1)[1])
+
+    with pytest.raises(OSError) as exc:
+        serve("whatever.pdf", port=port, open_browser=False)
+
+    assert "already serving" in str(exc.value)
+
+
+def test_a_free_port_is_not_mistaken_for_a_busy_one():
+    """A socket in TIME_WAIT does not accept, so the check must not break an
+    immediate restart -- which is the reason SO_REUSEADDR is on at all."""
+    from docyx.workspace.server import _port_is_taken
+
+    assert _port_is_taken(next(_ports)) is False
+
+
+def test_the_port_argument_is_bounded():
+    from docyx.workspace.__main__ import _port
+
+    assert _port("8000") == 8000
+    for bad in ("99999", "80", "abc"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            _port(bad)
+
+
+def test_a_missing_path_is_a_clean_error_not_a_traceback(capsys):
+    """PyMuPDF otherwise raises its own FileNotFoundError, where the main CLI
+    says "not a file"."""
+    from docyx.workspace.__main__ import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(["no_such_file.pdf", "--no-browser"])
+
+    assert exc.value.code == 2
+    assert "no such file or folder" in capsys.readouterr().err

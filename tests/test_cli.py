@@ -234,3 +234,22 @@ def test_an_uninstalled_language_is_refused_before_any_page_runs(tmp_path, capsy
     assert absent in message
     # Naming what IS available is the difference between a dead end and a fix.
     assert "Installed:" in message
+
+
+def test_a_percentage_is_refused_where_a_probability_belongs():
+    """`--ocr-min-confidence 50` reads as "50%" and float() accepts it, then
+    drops every recognised line -- so a scan comes back `failed` with
+    NO_TEXT_LAYER and looks unreadable rather than over-filtered."""
+    from docyx.cli import ocr_confidence
+
+    assert ocr_confidence("0.4") == 0.4
+    assert ocr_confidence("0") == 0.0
+    assert ocr_confidence("1") == 1.0
+
+    for bad in ("50", "-1", "1.5"):
+        with pytest.raises(argparse.ArgumentTypeError) as exc:
+            ocr_confidence(bad)
+        assert "between 0 and 1" in str(exc.value)
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        ocr_confidence("abc")

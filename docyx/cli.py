@@ -49,6 +49,26 @@ def ocr_language(value: str) -> str:
     return value
 
 
+def ocr_confidence(value: str) -> float:
+    """A confidence is a probability, so reject anything outside 0-1.
+
+    `--ocr-min-confidence 50` reads as a percentage and is accepted by float(),
+    then drops every recognised line -- so a scan comes back `failed` with
+    `NO_TEXT_LAYER` and the page looks unreadable rather than over-filtered.
+    Same shape as `--ocr` naming a language tesseract does not have.
+    """
+    try:
+        score = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number")
+    if not 0.0 <= score <= 1.0:
+        raise argparse.ArgumentTypeError(
+            f"{score:g} is not between 0 and 1. This is a probability, not a "
+            "percentage: 0.4 keeps lines scoring 40% or better."
+        )
+    return score
+
+
 def parse_pages(spec: Optional[str]) -> Optional[List[int]]:
     """Turn "0-4,9" into [0, 1, 2, 3, 4, 9]. Zero-based, matching the API."""
     if not spec:
@@ -133,7 +153,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--ocr-min-confidence",
-        type=float,
+        type=ocr_confidence,
         default=0.4,
         metavar="N",
         help="drop recognised lines below this score (0-1, default 0.4)",

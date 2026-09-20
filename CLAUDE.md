@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (313 tests, ~35s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (318 tests, ~40s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -375,6 +375,19 @@ Four rules, none of them negotiable:
 - **Tesseract, deliberately not PaddleOCR/EasyOCR** — on *runtime* footprint, not download size. It loads no Python ML framework into the process: ~1.8 GB RSS for EasyOCR and ~950 MB for PaddleOCR against tens of MB, plus 8–20 s of cold start. (The first version of this note said "~2 GB of torch", which was wrong twice: PaddleOCR runs on PaddlePaddle, and 2 GB is the CUDA build when both install from a CPU index.) Bengali accuracy was the trade expected to reverse this decision; **measured, it did not** — 0.987 against a clean reference with `tessdata_best`. Swapping engines still costs one file behind the seam if a real scan says otherwise.
 
 `lang` must match the document. `--ocr eng` on a Bengali scan does not fail — it returns confident Latin gibberish, which is worse. `--ocr-min-confidence` (default 0.4) drops low-scoring lines rather than returning them, because page speckle recognised as a one-character "word" lands mid-column and derails the reading order of everything around it.
+
+**Every flag that can be wrong is validated at parse time, and the reason is one recurring defect: a bad argument surfacing as a bad *document*.** Four of them shared that shape, and each one was found by running the flag rather than reading it:
+
+| flag | what it did | what it says now |
+|---|---|---|
+| `--ocr ben` (no `ben.traineddata`) | `1 failed [NO_TEXT_LAYER]` | names the missing language **and what is installed** |
+| `--ocr scan.pdf` | *"the following arguments are required: pdfs"* — blames the argument you did supply | "looks like a file, not a language code" |
+| `--ocr-min-confidence 50` | `1 failed [NO_TEXT_LAYER]` — reads as a percentage, drops every line | "this is a probability, not a percentage" |
+| `--port 8000` when taken | **hung silently** while the first server kept answering | "port 8000 is already serving" |
+
+The last one is the sharpest: `ThreadingHTTPServer` sets `SO_REUSEADDR`, which **on Windows lets the second bind succeed**. The second process then sat in `serve_forever` answering nothing while the first kept the connections — so starting the workspace twice looked like it worked and showed the other document. `_port_is_taken` connects rather than binds, because a socket merely in `TIME_WAIT` does not accept and an immediate restart must keep working.
+
+The workspace CLI also now rejects a missing path and an out-of-range port itself, instead of letting PyMuPDF's `FileNotFoundError` and `socket.bind`'s `OverflowError` reach the terminal as tracebacks.
 
 **`--ocr` is validated at parse time, and the reason is a defect that looked like something else entirely.** `--ocr ben` without `ben.traineddata` installed raised per page; `_safely` caught it as `STAGE_FAILED`, so the summary printed `1 failed` and the honest reading was *"this scan is unreadable"* rather than *"install a 5 MB data file"*. Two guards now:
 
