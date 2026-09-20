@@ -410,6 +410,14 @@ Three rules hold the UI together, and each one is load-bearing rather than decor
 
 Selecting an element scrims the page around it rather than tinting it, so the element's own pixels stay at full contrast — checking a claim against the pixels it came from is the whole job.
 
+**Zoom** (`−`/`+`/`0`, or the pill on the page) multiplies the fit scale rather than replacing it, so the percentage shown is the real one against the image. It was added because bbox handles shipped with no way to get close to them, which made small boxes uneditable in practice. The bench only gains a horizontal scrollbar above 1×, where the page genuinely is wider than it.
+
+**`Labels` (`L`) tags every box `4. section_header`** — the same number the outline shows, so the two panes name an element identically. Off by default because 57 tags hide a dense page, and **top-level only**: tagging a line's own style runs is the same over-listing the outline avoids.
+
+**A light theme** rides the same tokens, with the tier hues *re-tuned rather than replaced* — same four meanings, darkened to hold against white paper instead of near-black. The choice persists in `localStorage`.
+
+**Three stale-layout bugs, all the same shape**, worth knowing before touching `draw()`: sizing the canvas is what makes the scrollbar appear, which changes the width the fit was just measured against. Measuring in the same tick reads the pre-reflow value. Fixed by drawing *and* scheduling one more frame — never by deferring the only draw, because a background tab throttles `requestAnimationFrame` and the page then stays stale.
+
 **Text editing is wired up.** `POST /api/edit?page=N` with `{id, text}` finds the element and calls `edit_text()` — the only writer, so every rule in **Human edits are provenance** holds unchanged: `source` stays put, `original_text` is written once, the element becomes `exact` / 1.0 and turns purple in the viewer.
 
 - **The edit lands on the cached `Document`**, which makes the per-page cache the session's working copy rather than a speed trick. Navigating away and back keeps the correction; closing the process loses it, because nothing writes to disk yet.

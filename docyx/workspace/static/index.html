@@ -32,6 +32,19 @@
     --machine: "Cascadia Mono", ui-monospace, Consolas, monospace;
   }
 
+  /* A light bench for a lit room. The tier hues are a contract, so they are
+     re-tuned rather than replaced: the same four meanings, darkened enough to
+     hold their own against white paper instead of against near-black. */
+  [data-theme="light"] {
+    --bench: #eceef0;
+    --surface-1: #ffffff; --surface-3: #e6e9ec;
+    --hair: #d8dce1; --hair-strong: #b9c0c8;
+    --ink: #1a1d21; --ink-muted: #3d444c; --ink-subtle: #666e77;
+    --ink-tertiary: #8a929b;
+    --exact: #12874a; --detected: #1f63c8; --inferred: #a96a00;
+    --edited: #8b2fb8; --fail: #c02a2f;
+  }
+
   * { box-sizing: border-box; }
   html { scrollbar-color: var(--hair-strong) transparent; scrollbar-width: thin; }
   html, body { height: 100%; }
@@ -83,6 +96,9 @@
   }
   button:hover:not(:disabled) { color: var(--ink); background: var(--surface-3); }
   button:disabled { opacity: .3; cursor: default; }
+  /* A toggle has to look pressed; aria-pressed alone tells only a reader. */
+  button[aria-pressed="true"]:not(.tier) { color: var(--ink); background: var(--surface-3);
+                                border-color: var(--hair-strong); }
   #pageno { font-family: var(--machine); font-variant-numeric: tabular-nums;
             color: var(--ink-subtle); font-size: 12px; min-width: 66px; text-align: center; }
 
@@ -112,7 +128,7 @@
 
   /* ── bench + rail ───────────────────────────────────────────── */
   main { flex: 1; display: flex; min-height: 0; }
-  #bench {
+  #bench { position: relative;
     flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px; display: flex;
     justify-content: center; align-items: flex-start;
     background:
@@ -120,6 +136,18 @@
   }
   canvas { display: block; cursor: crosshair; background: #fff;
            box-shadow: 0 0 0 1px #0006, 0 18px 40px -16px #000c; }
+  [data-theme="light"] canvas { box-shadow: 0 0 0 1px #0003, 0 10px 28px -14px #0006; }
+
+  /* Zoom floats over the page rather than sitting in the header: it belongs
+     to the page, and it has to stay reachable while the page is scrolled. */
+  #zoom { position: absolute; right: 22px; bottom: 18px; display: flex;
+          align-items: center; gap: 2px; padding: 3px;
+          background: var(--surface-1); border: 1px solid var(--hair);
+          border-radius: 999px; box-shadow: 0 6px 20px #0006; }
+  #zoom button { border-radius: 999px; padding: 3px 7px; }
+  #pct { font-family: var(--machine); font-variant-numeric: tabular-nums;
+         font-size: 11px; color: var(--ink-subtle); min-width: 42px;
+         text-align: center; }
 
   aside {
     width: 372px; flex: none; border-left: 1px solid var(--hair);
@@ -191,6 +219,9 @@
   /* ── census: the legend carries data, and doubles as the filter ── */
   footer { display: flex; align-items: center; gap: 4px; padding: 8px 16px;
            border-top: 1px solid var(--hair); background: var(--surface-1); }
+  #census { display: flex; align-items: center; gap: 4px; }
+  #stats { font-family: var(--machine); font-variant-numeric: tabular-nums;
+           font-size: 11px; color: var(--ink-tertiary); }
   .tier { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px;
           border-radius: var(--r-xs); color: var(--ink-subtle); }
   .tier i { width: 8px; height: 8px; border-radius: 2px; align-self: center; }
@@ -222,6 +253,9 @@
       <button id="export" title="Write the whole document beside the PDF">Export</button>
       <button id="import" title="Reattach edits from a previous export">Import</button>
       <span class="sep"></span>
+      <button id="labels" title="Label every box (L)" aria-pressed="false">Labels</button>
+      <button id="theme" title="Light or dark">&#9680;</button>
+      <span class="sep"></span>
       <button id="prev" title="Previous page (&larr;)">&larr;</button>
       <span id="pageno">&mdash;</span>
       <button id="next" title="Next page (&rarr;)">&rarr;</button>
@@ -232,7 +266,15 @@
 
 <main>
   <div id="outline" role="listbox" aria-label="Elements in reading order"></div>
-  <div id="bench"><canvas id="c" tabindex="0" aria-label="Page with extracted elements"></canvas></div>
+  <div id="bench">
+    <canvas id="c" tabindex="0" aria-label="Page with extracted elements"></canvas>
+    <div id="zoom">
+      <button id="zoomOut" title="Zoom out (-)">&minus;</button>
+      <span id="pct">&mdash;</span>
+      <button id="zoomIn" title="Zoom in (+)">&plus;</button>
+      <button id="zoomFit" title="Fit to window (0)">&#8634;</button>
+    </div>
+  </div>
   <aside>
     <div id="issues"></div>
     <div id="detail"></div>
@@ -240,7 +282,11 @@
 </main>
 
 <div id="toast" hidden></div>
-<footer id="census"></footer>
+<footer>
+  <div id="census"></div>
+  <span class="grow"></span>
+  <span id="stats"></span>
+</footer>
 
 <script>
 const TIERS = {
@@ -257,6 +303,7 @@ const state = {
   index: 0, elements: [], image: null, selected: null, hovered: null,
   scale: 1, hidden: new Set(), rows: [], top: [], history: { undo: 0, redo: 0 },
   conflicts: [], orphans: [],
+  zoom: 1, fit: 1, labels: false,
 };
 
 // An edit outranks the confidence it replaced, so it is its own tier.
@@ -281,7 +328,15 @@ function draw() {
   if (!state.image) return;
   const dpr = window.devicePixelRatio || 1;
   const avail = $("bench").clientWidth - 48;
-  state.scale = Math.min(1, avail / state.image.width);
+  // Fit is the baseline; zoom multiplies it, so "100%" means the page fills
+  // the bench rather than meaning 150 DPI. The percentage shown is the real
+  // one against the image, which is what the manual's 42% refers to.
+  state.fit = Math.min(1, avail / state.image.width);
+  state.scale = state.fit * state.zoom;
+  $("pct").textContent = `${Math.round(state.scale * 100)}%`;
+  $("stats").textContent =
+    `${state.image.width} × ${state.image.height} px · ${shown().length} boxes shown`;
+  $("zoomFit").disabled = state.zoom === 1;
   const w = Math.round(state.image.width * state.scale);
   const h = Math.round(state.image.height * state.scale);
 
@@ -314,10 +369,10 @@ function draw() {
     ctx.lineWidth = sel ? 1.5 : 1;
     ctx.strokeStyle = sel ? "#fff" : (el === state.hovered ? "#ffffffaa" : colourOf(el) + "cc");
     ctx.strokeRect(x + .5, y + .5, bw, bh);
+    if (sel || el === state.hovered || (state.labels && state.top.includes(el)))
+      tag(el, x, y);
+
     if (sel) {
-      // A tick in the tier colour: the verdict stays attached to the box.
-      ctx.fillStyle = colourOf(el);
-      ctx.fillRect(x, y - 3, Math.min(bw, 18), 2);
       // Handles only where a drag is allowed, so their absence is the answer
       // to "why can't I move this?" rather than a dead grab.
       if (movable(el)) {
@@ -333,6 +388,21 @@ function draw() {
       }
     }
   }
+}
+
+/* `4. section_header` — the same number the outline shows, so the two panes
+   name the element identically and neither needs a hover to be read. Off by
+   default: 57 tags on a dense page hide the page. */
+function tag(el, x, y) {
+  const label = `${el.reading_order ?? "·"}. ${el.type}`;
+  ctx.font = "600 10px ui-monospace, Consolas, monospace";
+  const w = ctx.measureText(label).width + 8;
+  // Above the box, unless that is off the top of the page.
+  const ty = y < 13 ? y : y - 12;
+  ctx.fillStyle = colourOf(el);
+  ctx.fillRect(x, ty, w, 12);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, x + 4, ty + 9);
 }
 
 function hit(ev) {
@@ -725,7 +795,10 @@ async function load(index) {
   render(null);
 
   const img = new Image();
-  img.onload = () => { state.image = img; draw(); };
+  // Twice: the first draw sizes the canvas, which is what makes the
+  // vertical scrollbar appear, which changes the width the fit was
+  // measured against. One frame later that has settled.
+  img.onload = () => { state.image = img; draw(); requestAnimationFrame(draw); };
   img.src = `/api/image?page=${index}`;
 }
 
@@ -748,6 +821,43 @@ $("export").onclick = async () => {
   if (body) toast(`Wrote ${body.path}`);
   $("export").disabled = false;
 };
+
+/* ── zoom, labels, theme ──────────────────────────────────────── */
+
+const ZOOM = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+function setZoom(value) {
+  state.zoom = Math.min(ZOOM[ZOOM.length - 1], Math.max(ZOOM[0], value));
+  // Zoomed in, the page is wider than the bench and has to be pannable; at
+  // fit it never is, and a scrollbar there would be a measurement artefact.
+  $("bench").style.overflowX = state.zoom > 1 ? "auto" : "hidden";
+  // Now, then again once the scrollbar it just toggled has reflowed.
+  // Deferring the only draw leaves the page stale if the frame is
+  // throttled, which a background tab does.
+  draw();
+  requestAnimationFrame(draw);
+}
+const zoomStep = dir => setZoom(
+  ZOOM[Math.min(ZOOM.length - 1, Math.max(0, ZOOM.indexOf(state.zoom) + dir))]
+    ?? state.zoom);
+
+$("zoomIn").onclick = () => zoomStep(1);
+$("zoomOut").onclick = () => zoomStep(-1);
+$("zoomFit").onclick = () => setZoom(1);
+
+$("labels").onclick = () => {
+  state.labels = !state.labels;
+  $("labels").setAttribute("aria-pressed", state.labels);
+  draw();
+};
+
+function setTheme(name) {
+  document.documentElement.dataset.theme = name;
+  try { localStorage.setItem("docyx-theme", name); } catch (e) { /* private mode */ }
+  draw();  // the scrim and handle strokes are theme-coloured
+}
+$("theme").onclick = () =>
+  setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 
 $("import").onclick = async () => {
   $("import").disabled = true;
@@ -773,6 +883,10 @@ document.addEventListener("keydown", e => {
     return;
   }
   if (e.target.isContentEditable || e.target.tagName === "SUMMARY") return;
+  if (e.key === "+" || e.key === "=") { zoomStep(1); return; }
+  if (e.key === "-") { zoomStep(-1); return; }
+  if (e.key === "0") { setZoom(1); return; }
+  if (e.key.toLowerCase() === "l") { $("labels").click(); return; }
   if (e.key === "ArrowLeft" && state.index > 0) load(state.index - 1);
   else if (e.key === "ArrowRight" && !$("next").disabled) load(state.index + 1);
   else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
@@ -780,6 +894,8 @@ document.addEventListener("keydown", e => {
   else if (e.key === "Escape") select(null);
   else return;
 });
+try { setTheme(localStorage.getItem("docyx-theme") || "dark"); }
+catch (e) { setTheme("dark"); }
 window.addEventListener("resize", draw);
 load(0);
 </script>
