@@ -30,7 +30,8 @@ from docyx.pipeline.gate import TextLayerGate
 
 #: Every directory holding input PDFs. `.corpus/docling` is another tool's
 #: output, not input, so it is deliberately absent.
-CORPORA = [Path(".corpus"), Path(".corpus/real"), Path(".corpus/ar")]
+CORPORA = [Path(".corpus"), Path(".corpus/real"), Path(".corpus/ar"),
+           Path(".corpus/scans")]
 
 #: Text-layer faults that OCR can repair. Same list as REPAIRABLE_CODES, kept
 #: as a display grouping rather than imported, because this reports what was
