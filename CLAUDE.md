@@ -437,15 +437,15 @@ So `analysis/headings.py` plus the manual control cover the same ground at a fra
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is still unused, and has no planned producer.
 
-## Workspace (phase 5, first slice)
+## Workspace
 
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx.workspace file.pdf [--layout] [--tables] [--ocr ben]
 ```
 
-Renders each page with its extracted elements drawn over it; click a box to see its JSON. Boxes are coloured by `confidence.type` — green `exact`, blue `detected`, amber `inferred`, purple edited — so a page's trustworthiness is visible before reading anything.
+Renders each page with its extracted elements drawn over it, an outline of the page in reading order beside it, and an inspector for whatever is selected. Boxes are coloured by `confidence.type` — green `exact`, blue `detected`, amber `inferred`, purple edited — so a page's trustworthiness is visible before reading anything.
 
-**This exists as a feedback loop, not a feature.** The last code review found 12 issues, three of which were regressions that 219 passing tests missed — including `--layout` taking a page from 3 headings to zero — because no test ever rendered the output the way a user sees it.
+**This exists as a feedback loop, not a feature**, and it keeps earning that. The phase 1–4 code review found 12 issues, three of them regressions that 219 passing tests missed — including `--layout` taking a page from 3 headings to zero — because no test rendered the output the way a user sees it. Every workspace change since has found more the same way: a font size printed as `11.039999961853027pt`, a selection scrim opaque enough to hide the page, a trust bar showing solid green on a `PARTIAL` page, a `413` that never reached the client, `Save`/`Cancel` visible with nothing to save, and labels burying the page under its own line fragments. **If you change this file, look at it rendered.** The tests cannot.
 
 `http.server` from the stdlib, deliberately: one image, one JSON blob and one HTML file do not justify a fifth core dependency. The routes are thin so FastAPI can replace it when uploads, auth or concurrency arrive.
 
@@ -533,7 +533,11 @@ No revert button, deliberately: `original_text` makes one trivial, but re-applyi
 
 ## Planning docs
 
-`.planning/` (GSD workflow: `ROADMAP.md`, `STATE.md`, per-phase dirs) tracks the 6-phase roadmap; phases 1–4 are complete. Phase 5 is the workspace UI — but the CLI, listed under phase 5, shipped early because being fast and light buys nothing while the tool is import-only. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
+`.planning/` (GSD workflow: `ROADMAP.md`, `STATE.md`, per-phase dirs) tracks the 6-phase roadmap. **Phases 1–5 are complete**; the CLI, listed under phase 5, shipped early in phase 4 because being fast and light buys nothing while the tool is import-only.
+
+**Phase 6 has one criterion that cannot be met as written.** It asks that "`ocr` and `visual_inference` provenance become active". `ocr` is live and measured. `visual_inference` is the enum value this file says "must stay unused", and nothing plans to produce it — so the roadmap is asking for something the architecture forbids. Resolve it by dropping the criterion or deleting the enum value; do not satisfy it by inventing a producer.
+
+**The remaining debt is evidence, not features.** Reading-order truth is still 8 pages; one real scan is measured; and there is no scorer for semantic roles or table structure — so the type editing and the heading suggester both ship with nothing that can tell you whether their output is right. That is the trap the reading-order harness exists to avoid. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
 
 - `universal_page_document_metadata_extraction_plan_v6.md` — architecture, pipeline, schema
 - `universal_page_metadata_extraction_tool_uiux_plan_v3.md` — the phase-5 workspace UI
