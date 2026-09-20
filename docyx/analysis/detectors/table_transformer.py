@@ -8,7 +8,7 @@ Coordinates in and out are 150 DPI reference pixels (§16).
 """
 
 import io
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from docyx.analysis.tables import CellDetection, TableDetection
 from docyx.core.geometry import BoundingBox

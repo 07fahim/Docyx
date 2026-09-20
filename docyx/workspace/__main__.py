@@ -1,7 +1,6 @@
 """python -m docyx.workspace (document.pdf | folder/) [--layout] [--tables] [--ocr LANG]"""
 
 import argparse
-import sys
 
 from docyx.workspace.server import serve
 

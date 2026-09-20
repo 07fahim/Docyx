@@ -6,7 +6,6 @@ from docyx.analysis.ocr import OCRAnalyzer
 from docyx.analysis.reading_order import TEXT_ROLES, ReadingOrderCalculator
 from docyx.analysis.tables import TableAnalyzer
 from docyx.analysis.visual import VisualAnalyzer
-from docyx.core.constants import SCALE
 from docyx.core.metadata import ProvenanceSource
 from docyx.pdf.renderer import PDFRenderer
 from docyx.pdf.text_extractor import NativeTextExtractor
