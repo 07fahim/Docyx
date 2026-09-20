@@ -1,23 +1,22 @@
-"""Export as BornoChinho annotation files, paired with page images.
+"""Export page images paired with flat block annotations.
 
-BornoChinho is an annotation tool for building OCR training data from scanned
-pages. Its manual states the job exactly: the category and the words are
-usually already typed, and *"What is missing is the position, where on the
-image that block actually is."*
+The shape page-annotation tools read when building OCR training data: one
+entry per block, holding a category, its text, and its box. Nothing else.
 
-Producing positions is what Docyx does, so this writes its output in the shape
-that tool reads — turning a measuring pass into a checking pass.
+    python -m docyx book.pdf -f blocks -o out/ --layout
 
-    python -m docyx book.pdf -f bornochinho -o out/ --layout
+Such a tool's usual bottleneck is *position* — the category and the words are
+typically transcribed already, and what is missing is where on the image each
+block sits. Producing positions is what Docyx does, so this turns a measuring
+pass into a checking one.
 
-Its schema is deliberately closed: `{category, text, bbox}` and *"Nothing else
-is allowed in an entry"*. So this is a lossy export by design — confidence,
-provenance, script, typography and reading order are all dropped. Use `json`
-or `bundle` when any of that matters.
+Lossy by design. The entry is closed at `{category, text, bbox}`, so
+confidence, provenance, script, typography and reading order are all dropped.
+Use `json` or `bundle` when any of that matters.
 
-Files are written flat with matching stems, because that pairing is how the
-tool associates an image with its annotation, and it only reads files sitting
-directly inside the chosen folder:
+Images and annotations are written flat with matching stems, because that
+pairing is how these tools associate the two, and they generally read only
+files sitting directly inside the chosen folder:
 
     out/
     ├── book_page_0001.png
@@ -33,10 +32,10 @@ from docyx.core.metadata import ProvenanceSource
 from docyx.pdf.renderer import PDFRenderer
 from docyx.schema.models import Document, Element, Page
 
-#: Docyx type -> the ten names BornoChinho accepts. Capitalisation matters to
-#: it ("Text" works, "text" does not), so these are written out rather than
-#: derived: a renamed type should fail loudly here, not silently export a
-#: category its validator rejects.
+#: Docyx type -> the ten category names this format uses. Capitalisation is
+#: significant ("Text" works, "text" does not), so these are written out
+#: rather than derived: a renamed type should fail loudly here, not silently
+#: export a category a consumer rejects.
 CATEGORIES: Dict[str, str] = {
     "text": "Text",
     "text_region": "Text",
@@ -52,15 +51,14 @@ CATEGORIES: Dict[str, str] = {
     "figure": "Picture",
 }
 
-#: The one category with no words. Giving it text is rejected as an
-#: "Unexpected field", and withholding text from anything else is a
-#: "Missing field".
+#: The one category with no words. Giving it text is an unexpected field;
+#: withholding text from anything else is a missing one.
 PICTURE = "Picture"
 
-#: DocLayNet has 11 classes and BornoChinho accepts 10. A formula is not
+#: DocLayNet has 11 classes and this format carries 10. A formula is not
 #: prose, so exporting it as Text would poison the very labels this file
 #: exists to produce. Dropped and counted instead — a block with no box is
-#: something their review pass looks for, a mislabelled one is not.
+#: something a review pass looks for, a mislabelled one is not.
 UNMAPPABLE = {"formula"}
 
 
@@ -68,14 +66,14 @@ def _bbox(element: Element, width: int, height: int) -> List[int]:
     """150 DPI top-left x/y/w/h -> [left, top, right, bottom], 1-indexed.
 
     Docyx's reference pixels are already this image's pixels, so there is no
-    scaling — only the origin convention differs: *"The very top-left of the
-    picture counts as 1, not 0."* Clamped, not shifted; shifting every
-    coordinate by one would move every box.
+    scaling — only the origin convention differs: the top-left pixel counts as
+    1, not 0. Clamped, not shifted; shifting every coordinate by one would move
+    every box off its words.
     """
     box = element.geometry.bbox
     left = min(max(1, round(box.x)), width)
     top = min(max(1, round(box.y)), height)
-    # At least one pixel wide and tall: their validator rejects a box that is
+    # At least one pixel wide and tall: a consumer rejects a box that is
     # inside out or has no size, and a zero-height rule would produce one.
     right = min(max(left + 1, round(box.x + box.width)), width)
     bottom = min(max(top + 1, round(box.y + box.height)), height)
@@ -104,8 +102,8 @@ def _contains(region: Element, line: Element) -> bool:
 def _blocks(page: Page) -> List[Tuple[Element, Optional[str]]]:
     """The page as blocks, with the text each one should carry.
 
-    BornoChinho's blocks are paragraphs; Docyx extracts at line granularity
-    (§5). So when a layout model has run, its regions ARE the blocks and the
+    Blocks here are paragraphs; Docyx extracts at line granularity (§5).
+    So when a layout model has run, its regions ARE the blocks and the
     lines inside them supply the words. Without one there are no regions, and
     lines are the best available answer — more entries than a person would
     draw, but every one of them correct.
@@ -131,29 +129,28 @@ def _blocks(page: Page) -> List[Tuple[Element, Optional[str]]]:
         inside.sort(key=lambda el: (el.reading_order is None, el.reading_order))
         blocks.append((region, " ".join(el.text for el in inside) or None))
 
-    # A line in no region is still a block on the page. Dropping it would
-    # produce exactly the defect their review pass hunts for: a block with
-    # no box around it.
+    # A line in no region is still a block on the page. Dropping it produces
+    # exactly the defect a review pass hunts for: a block with no box.
     blocks.extend((el, el.text) for el in lines if id(el) not in claimed)
     blocks.sort(key=lambda b: (b[0].geometry.bbox.y, b[0].geometry.bbox.x))
     return blocks
 
 
 def page_entries(page: Page) -> Tuple[List[Dict], List[str]]:
-    """One page as BornoChinho entries, plus a reason for anything dropped."""
+    """One page as block entries, plus a reason for anything dropped."""
     entries: List[Dict] = []
     dropped: List[str] = []
 
     for element, text in _blocks(page):
         if element.type in UNMAPPABLE:
-            dropped.append(f"{element.id}: {element.type} has no BornoChinho category")
+            dropped.append(f"{element.id}: {element.type} has no category in this format")
             continue
         category = CATEGORIES.get(element.type)
         if category is None:
             dropped.append(f"{element.id}: {element.type} is not an exportable block")
             continue
         if category != PICTURE and not (text or "").strip():
-            dropped.append(f"{element.id}: {category} with no text would fail their check")
+            dropped.append(f"{element.id}: {category} with no text would fail validation")
             continue
 
         entry: Dict = {"category": category,
@@ -166,11 +163,11 @@ def page_entries(page: Page) -> Tuple[List[Dict], List[str]]:
 
 
 def validate(entries: List[Dict], width: int, height: int) -> List[str]:
-    """Their §10 checks, run before writing rather than after.
+    """The consumer-side checks, run before writing rather than after.
 
     Claiming compatibility is cheap; this is what makes it testable. A file
-    this refuses is a file their Save would refuse, and finding out here beats
-    finding out in front of the page.
+    this refuses is one an annotation tool would refuse to open, and finding
+    out here beats finding out in front of the page.
     """
     problems = []
     for index, entry in enumerate(entries, start=1):
@@ -195,7 +192,7 @@ def validate(entries: List[Dict], width: int, height: int) -> List[str]:
     return problems
 
 
-def write_bornochinho(document: Document, pdf_path: str, target: Path) -> List[Path]:
+def write_blocks(document: Document, pdf_path: str, target: Path) -> List[Path]:
     """Write one image and one annotation per page, stems matching."""
     target.mkdir(parents=True, exist_ok=True)
     stem = Path(pdf_path).stem
@@ -207,7 +204,7 @@ def write_bornochinho(document: Document, pdf_path: str, target: Path) -> List[P
             problems = validate(entries, page.width, page.height)
             if problems:
                 raise ValueError(
-                    f"page {page.page_number} would be rejected by BornoChinho:\n  "
+                    f"page {page.page_number} would fail block validation:\n  "
                     + "\n  ".join(problems)
                 )
 

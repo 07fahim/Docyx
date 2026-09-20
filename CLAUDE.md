@@ -11,7 +11,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx file.pdf -o out.json   # CLI
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
-PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f bornochinho -o out/  # BornoChinho annotation pairs
+PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
 .venv/Scripts/python.exe -m pytest -q            # full suite (265 tests, ~35s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.7.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
@@ -195,18 +195,19 @@ out/
 
 Figures are cropped by re-rendering the page rather than holding page images through the pipeline: a 150-DPI RGB page is ~6 MB, and keeping one per page for a 200-page report to crop a handful of figures is the wrong trade.
 
-### BornoChinho export
+### Block-annotation export
 
-`-f bornochinho -o DIR` writes [docyx/export/bornochinho.py](docyx/export/bornochinho.py) — page images and annotations in the shape BornoChinho reads, flat, with matching stems because that pairing is how it associates the two and it only reads files directly inside the chosen folder.
+`-f blocks -o DIR` writes [docyx/export/blocks.py](docyx/export/blocks.py) — page images paired with flat block annotations, the shape page-annotation tools read when building OCR training data. One entry per block: a category, its text, its box, nothing else. Flat, with matching stems, because that pairing is how such tools associate the two and they generally read only files directly inside the chosen folder.
 
-**Why this format and not another.** BornoChinho's manual states the annotation job exactly: the category and the words are usually already typed, and *"What is missing is the position, where on the image that block actually is."* Producing positions is what Docyx does, so this turns a measuring pass into a checking pass — the mode §6 of that manual already describes for positions "guessed automatically by another program".
+**Why this format and not another.** The usual bottleneck in that workflow is *position* — the category and the words are typically transcribed already, and what is missing is where on the image each block sits. Producing positions is exactly what Docyx does, so this turns a measuring pass into a checking one.
 
-- **Lossy by design.** Its schema is closed — `{category, text, bbox}`, *"Nothing else is allowed in an entry"* — so confidence, provenance, script, typography and reading order are all dropped. Use `json` or `bundle` when any of that matters.
+- **Lossy by design.** The entry is closed at `{category, text, bbox}`, so confidence, provenance, script, typography and reading order are all dropped. Use `json` or `bundle` when any of that matters.
 - **Coordinates are clamped, never shifted.** `bbox` is `[left, top, right, bottom]` in image pixels with origin 1, and Docyx's 150-DPI reference pixels *are* the rendered PNG's pixels, so there is no scaling. Real pages need the clamp: `wiki_ar.pdf` p6 has a justified RTL line at `x = -11.9`. Adding one to every coordinate would satisfy the origin rule and move every box off its words.
-- **`--layout` changes the granularity, and should.** Its blocks are paragraphs; Docyx extracts lines (§5). With a layout model the regions *are* the blocks and the lines inside supply the words — `arxiv_attention` p2 exports 10 blocks. Without one, lines are the best available answer: `wiki_ar` p6 exports 57. More entries than a person would draw, every one correct.
-- **A line in no region is still exported.** Dropping it would produce the exact defect that tool's review pass hunts for — a block on the page with no box at all.
-- **`formula` is dropped and reported, not relabelled.** DocLayNet has 11 classes and BornoChinho accepts 10. Exporting a formula as `Text` would poison the very labels this export exists to produce; an unannotated block is something a reviewer catches, a mislabelled one is not.
-- **`validate()` mirrors its §10 checks and runs before writing.** Claiming compatibility is cheap; refusing to write a file that tool would reject is what makes the claim testable. Unknown category, wrong field set, inside-out or upside-down box, anything below 1, anything past the image edge.
+- **`--layout` changes the granularity, and should.** Blocks here are paragraphs; Docyx extracts lines (§5). With a layout model the regions *are* the blocks and the lines inside supply the words — `arxiv_attention` p2 exports 10 blocks. Without one, lines are the best available answer: `wiki_ar` p6 exports 57. More entries than a person would draw, every one correct.
+- **A line in no region is still exported.** Dropping it produces the exact defect a review pass hunts for — a block on the page with no box at all.
+- **`formula` is dropped and reported, not relabelled.** DocLayNet has 11 classes and this format carries 10. Exporting a formula as `Text` would poison the very labels the export exists to produce; an unannotated block is something a reviewer catches, a mislabelled one is not.
+- **`validate()` mirrors the consumer-side checks and runs before writing.** Claiming compatibility is cheap; refusing to write a file an annotation tool would reject is what makes the claim testable. Unknown category, wrong field set, inside-out or upside-down box, anything below 1, anything past the image edge.
+- **The category is only as good as `type`, which is why it is editable.** Without a layout model every element is `text`, so a title, a section header and a paragraph all export as `Text`. `edit_type()` and the workspace's type control are what make this field mean anything — see **Human edits are provenance**.
 
 ### Markdown export doubles as an evaluation instrument
 

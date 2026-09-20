@@ -1,8 +1,8 @@
-"""Export in BornoChinho's annotation shape.
+"""Export in the flat block-annotation shape.
 
-Compatibility is a claim, and these are what make it checkable: the schema is
+Compatibility is a claim, and these are what make it checkable: the entry is
 closed, the categories are case-sensitive, and the coordinate origin is 1 --
-so anything this writes has to survive that tool's own Save checks, which
+so anything this writes has to survive a consuming tool's own checks, which
 `validate` mirrors.
 """
 
@@ -14,16 +14,16 @@ import pytest
 from docyx.analysis.layout import LayoutAnalyzer, LayoutDetection
 from docyx.core.geometry import BoundingBox, Geometry
 from docyx.core.metadata import Confidence, ConfidenceType, Provenance, ProvenanceSource
-from docyx.export.bornochinho import (
+from docyx.export.blocks import (
     CATEGORIES,
     page_entries,
     validate,
-    write_bornochinho,
+    write_blocks,
 )
 from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import Element, Page, PageStatus
 
-#: The ten names the tool accepts, from its manual. Nothing else may appear.
+#: The ten category names this format carries. Nothing else may appear.
 ACCEPTED = {
     "Title", "Section-header", "Text", "List-item", "Table",
     "Picture", "Caption", "Footnote", "Page-header", "Page-footer",
@@ -60,7 +60,7 @@ def page_of(*elements, width=600, height=800):
 
 
 def test_every_mapped_category_is_one_the_tool_accepts():
-    """Capitalisation matters to it: "Text" works, "text" and "TEXT" do not."""
+    """Capitalisation is significant: "Text" works, "text" and "TEXT" do not."""
     assert set(CATEGORIES.values()) <= ACCEPTED
 
 
@@ -137,7 +137,7 @@ def test_a_formula_is_dropped_and_reported_rather_than_called_text():
     entries, dropped = page_entries(page_of(element("formula")))
 
     assert entries == []
-    assert "no BornoChinho category" in dropped[0]
+    assert "no category in this format" in dropped[0]
 
 
 # --- block granularity ------------------------------------------------------
@@ -206,7 +206,7 @@ def test_images_and_annotations_are_written_with_matching_stems(pdf, tmp_path):
     out = tmp_path / "out"
     document = DocyxPipeline().process(pdf, "book")
 
-    written = write_bornochinho(document, pdf, out)
+    written = write_blocks(document, pdf, out)
 
     assert len(written) == 4, "two pages, an image and an annotation each"
     stems = sorted({p.stem for p in out.iterdir()})
