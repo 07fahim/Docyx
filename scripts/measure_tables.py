@@ -181,6 +181,12 @@ def score_page(path: Path, analyzer: TableAnalyzer) -> dict:
     from scripts.dump_lines import checksum
 
     truth = json.loads(path.read_text(encoding="utf-8"))
+    if "grid" not in truth:
+        raise SystemExit(
+            f"{path.name} has no 'grid': this is not a table truth file. "
+            "One directory per scorer -- region samples live in "
+            "truth/table_regions/."
+        )
     pdf = CORPUS_DIR / truth["document"]
     page = DocyxPipeline(table_analyzer=analyzer).process(
         str(pdf), truth["document"], pages=[truth["page"]]

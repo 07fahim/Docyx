@@ -105,6 +105,7 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_reading_order.py        # 
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_types.py               # semantic roles, per class
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_tables.py              # table structure (needs models)
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_table_regions.py       # does it fire ONLY on tables
+PYTHONPATH=. .venv/Scripts/python.exe scripts/sample_table_detections.py draw 40   # precision, with an interval
 PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
@@ -352,7 +353,22 @@ On `arxiv_gpt3` p7 it scores **1.000 with all 72 cells**, where the model gets 6
 
 **The discriminator is width *variation*, not width.** `MAX_FILL` looked sufficient until a two-column abstract measured 0.84 against a real table's 0.80 — inseparable. Prose lines all run to the same measure (CV 0.32); table cells do not (0.52–0.75); equations and diagram labels vary more than either (0.98, 1.12). A table is bounded on both sides.
 
-**It is off by default, and that is the honest call.** Every time the adversarial page list grew, a new false-positive class appeared — title-page author grids, running heads, figure labels, then displayed equations, found only when I looked at whole documents instead of six pages. Three labelled tables is enough to offer this and not enough to change what every existing caller gets. Assume more classes remain unfound.
+**It is off by default, and it is now measured how far off it is.** `measure_table_regions.py` grades hand-picked adversarial pages, which is a bug-finding tool rather than a measurement: the pages are chosen by whoever already knows where the bugs are, so "nothing broke on my nine pages" could never converge. `scripts/sample_table_detections.py` measures the quantity that actually decides the default — **what share of detections on an unseen page are real tables** — by running all 1325 corpus pages, drawing a seeded random sample of the 500 detections, and reporting a Wilson interval.
+
+**Precision is 0.650, 95% CI [0.495, 0.779].** The bar was set at 0.95 *before* adjudication, and **the lower bound decides**, not the point estimate: 20 clean samples read 1.000 with a bound near 0.84. So tables stay off by default, and now with a number rather than an intuition.
+
+The 14 false positives in 40 fall into six families, **none of which appeared in the nine adversarial pages**:
+
+| family | seen in |
+|---|---|
+| back-of-book index | `rfc9110` p182/p189, `rfc2616` p110 |
+| RFC prose under a running head | `rfc2616` p30/p42, `rfc9110` p31/p107 |
+| instruction prose in columns | `irs_fw9` p2, p3 (×2) |
+| list — bulleted or references | `nasa_budget` p221, `arxiv_bert` p11 |
+| a figure | `arxiv_gpt3` p50 |
+| infobox interleaved with body across the gutter | `wiki_bn` p1 |
+
+That is the confirmation the hand-picked set could not give, and it says the discovery curve had not flattened at all — it had barely started.
 
 **3 tables is an instrument, not a benchmark**, and one of the three is deliberately the hardest page in the corpus. The metric itself is unit-tested without weights in [tests/test_table_transformer.py](tests/test_table_transformer.py) — a scorer nobody can check is worth no more than the score it prints.
 
