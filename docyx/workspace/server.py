@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import ValidationError
 
+from docyx.analysis.check import check_page
 from docyx.analysis.headings import suggest
 from docyx.core.geometry import BoundingBox
 from docyx.pdf.renderer import PDFRenderer
@@ -168,6 +169,14 @@ class Workspace:
     def history(self, index: int) -> Dict[str, int]:
         return {"undo": len(self._undo.get(index) or []),
                 "redo": len(self._redo.get(index) or [])}
+
+    def check(self, index: int) -> List[Dict[str, Any]]:
+        """Advisory findings for a page. Never mutates, so it is safe to re-run
+        after every edit — which is how a reviewer would want to use it."""
+        return [
+            {"code": f.code, "message": f.message, "ids": f.ids}
+            for f in check_page(self.page(index).pages[0])
+        ]
 
     # --- export ----------------------------------------------------------
 
@@ -330,6 +339,9 @@ def _handler(workspace: Workspace):
                         ),
                     }
                     self._send(200, json.dumps(payload).encode("utf-8"), "application/json")
+                elif url.path == "/api/check":
+                    body = {"findings": workspace.check(self._page_index(url.query))}
+                    self._send(200, json.dumps(body).encode("utf-8"), "application/json")
                 elif url.path == "/api/image":
                     self._send(200, workspace.image(self._page_index(url.query)), "image/png")
                 else:

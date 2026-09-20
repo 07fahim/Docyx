@@ -541,6 +541,16 @@ A block takes the colour of its **weakest** line: a paragraph holding one `infer
 
 **Undo/redo restores a snapshot; it never re-applies an edit in reverse.** `_snapshot` deep-copies text, geometry, confidence and provenance together, because "edit it back" leaves `modified_by_user` set and the element `exact` / 1.0 — claiming a human vouched for a value they just took back. History is **per page**: a global stack would make Ctrl+Z reach into a page the user has already left. An empty history is `409`, a normal state rather than a fault.
 
+**The page check report** is [docyx/analysis/check.py](docyx/analysis/check.py) → `GET /api/check?page=N` → cards in the inspector. Four faults that a `Document` can carry while validating perfectly and exporting without complaint, which is exactly why they need their own panel rather than a place beside the gate's `PageIssue`s: `ZERO_SIZE_BOX`, `BOX_OFF_PAGE`, `EMPTY_TEXT`, `STACKED_BOXES`.
+
+- **There is no Check button, deliberately.** It is pure geometry over an already-cached page, so it runs on every page load and after every mutation — `send()` in the viewer is the single funnel, so that is one call site. A check you have to remember to press is a check nobody presses, and a report left over from before an edit is worse than none because it reports a defect you just fixed.
+- **Every threshold is measured, not chosen.** `BOX_OFF_PAGE` allows 2% of page width (~25px, about one line height at 150 DPI) because `wiki_ar.pdf` p6 has 31 justified RTL lines starting left of zero and the worst is 11.9px out — while every other corpus page overshoots by exactly 0. At zero tolerance the check put 31 findings on a page with nothing wrong with it.
+- **`STACKED_BOXES` compares same-type boxes only.** A line sits wholly inside its own `layout_region` by design, and reporting that would bury every real duplicate. On real input it fires once in the corpus, on `irs_f1040.pdf` p0: the `/` date separators are extracted as their own lines inside the wider line's box. That is genuine over-segmentation — the failure class CLAUDE.md elsewhere calls ungradeable — so this catches a slice of something otherwise unmeasured.
+- **Findings name elements and never change them**, and each id is a chip that selects that element, because a report you cannot act on from is a traceback with better typography.
+- **The card takes the lavender chrome accent, not a tier hue.** A finding is Docyx speaking in its own voice, not data; the tier colours are a schema contract and stay out of it.
+
+`test_real_pages_stay_clean` pins the false-positive rate: a check that fires on ordinary pages is a check nobody will read.
+
 **Export** is `POST /api/export` → `<stem>.docyx.json` beside the PDF.
 
 - **Validate, then write.** A file that fails its own schema must not exist, so `Document.model_validate` runs first and a failure is `422` with nothing written. Pydantic does not validate on assignment, so this is a real check rather than a tautology.

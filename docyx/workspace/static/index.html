@@ -165,6 +165,25 @@
   .issue.err code { color: var(--fail); }
   .issue p { margin: 0; color: var(--ink-subtle); font-size: 12px; }
 
+  /* Check findings are advisory: not a gate error, not a gate warning, and a
+     page full of them still validates and still exports. So they stay on the
+     neutral surface and take the lavender chrome accent rather than any tier
+     hue — claiming a data colour for something that is not data is the one
+     thing this palette does not do. */
+  .find { padding: 12px 16px; border-bottom: 1px solid var(--hair); }
+  .find code { font-family: var(--machine); font-size: 11px; color: var(--accent);
+               display: block; margin-bottom: 3px; }
+  .find p { margin: 0 0 8px; color: var(--ink-subtle); font-size: 12px; line-height: 1.4; }
+  .find .ids { display: flex; flex-wrap: wrap; gap: 4px; }
+  .find .ids button {
+    font-family: var(--machine); font-size: 10px; color: var(--ink-subtle);
+    background: var(--bench); border: 1px solid var(--hair);
+    border-radius: var(--r-xs); padding: 2px 6px; cursor: pointer;
+  }
+  .find .ids button:hover { color: var(--ink); border-color: var(--hair-strong); }
+  .find .ids .more { color: var(--ink-faint); font-size: 10px; align-self: center;
+                     font-family: var(--machine); }
+
   /* The claim: what this element says it is, and what it says. */
   .claim { font-family: var(--machine); font-size: 12px; color: var(--ink-subtle); }
   .claim b { color: var(--ink); }
@@ -283,6 +302,7 @@
   </div>
   <aside>
     <div id="issues"></div>
+    <div id="findings"></div>
     <div id="detail"></div>
   </aside>
 </main>
@@ -617,6 +637,10 @@ async function send(path, body) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.status);
     if (data.history) setHistory(data.history);
+    // Every mutation routes through here, so this is the one place the report
+    // can go stale — and a stale check is worse than none, because it says a
+    // defect is still there after you have just fixed it.
+    refreshCheck();
     return data;
   } catch (e) {
     toast(String(e.message || e), true);
@@ -682,6 +706,55 @@ async function timeTravel(path) {
   const el = state.elements.find(e => e.id === body.element.id);
   if (el) patch(el, body.element);
   census(); buildOutline(); select(el || null);
+}
+
+/* Defects that validate cleanly: a box with no size, a box off the page, an
+   outlined line holding no text, two boxes stacked on one block. None of these
+   is a gate issue and none blocks export, so they get their own panel rather
+   than being mixed in with what the gate found.
+
+   There is no Check button on purpose. The report is pure geometry over a
+   page that is already cached, so running it on every load and after every
+   edit costs nothing — and a check you have to remember to press is a check
+   nobody presses. Debounced because `Suggest` sends one request per proposal. */
+let checkTimer = null;
+
+function refreshCheck() {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(async () => {
+    const index = state.index;
+    try {
+      const res = await fetch(`/api/check?page=${index}`);
+      const data = await res.json();
+      if (state.index === index) renderFindings(data.findings || []);
+    } catch (e) {
+      // Advisory. A page that cannot be checked is still a page you can read.
+    }
+  }, 120);
+}
+
+const SHOWN_IDS = 12;
+
+function renderFindings(findings) {
+  // Headed, so a finding cannot be mistaken for something the gate said. An
+  // empty report shows nothing at all: a permanent "0 problems" row is a line
+  // of chrome that is right 90% of the time and therefore never read.
+  $("findings").innerHTML = (findings.length
+    ? `<div class="sect" style="padding-bottom:0;border:0"><div class="label">Check</div></div>`
+    : "") + findings.map(f => {
+    const shown = f.ids.slice(0, SHOWN_IDS);
+    const rest = f.ids.length - shown.length;
+    return `<div class="find"><code>${esc(f.code)}</code><p>${esc(f.message)}</p>
+      <div class="ids">${shown.map(id =>
+        `<button data-id="${esc(id)}">${esc(id)}</button>`).join("")}${
+        rest > 0 ? `<span class="more">+${rest} more</span>` : ""}</div></div>`;
+  }).join("");
+  // Naming an element is only half a report; the point is to go look at it.
+  for (const button of $("findings").querySelectorAll(".ids button"))
+    button.onclick = () => {
+      const el = state.elements.find(e => e.id === button.dataset.id);
+      if (el) select(el);
+    };
 }
 
 function select(el) {
@@ -867,6 +940,8 @@ async function load(index) {
 
   state.types = data.types || [];
   setHistory(data.history);
+  renderFindings([]);
+  refreshCheck();
   census();
   buildOutline();
   render(null);

@@ -679,3 +679,32 @@ def test_a_suggestion_does_not_overwrite_a_human_or_a_model(tmp_path):
 
     assert workspace.suggest_headings(0) == [], "a human's answer is not re-proposed"
     workspace.close()
+
+
+# --- page check -------------------------------------------------------------
+
+
+def test_check_reports_a_defect_a_human_edit_created(pdf):
+    """The report exists because these defects validate and export cleanly.
+
+    Dragging a box to nothing is the easiest way to make one, and the check
+    must see it after the edit rather than before.
+    """
+    workspace = Workspace(pdf)
+    element = workspace.page(0).pages[0].elements[0]
+    assert workspace.check(0) == []
+
+    workspace.move(0, element.id, BoundingBox(x=10, y=10, width=0, height=0))
+    findings = workspace.check(0)
+
+    assert [f["code"] for f in findings] == ["ZERO_SIZE_BOX"]
+    assert findings[0]["ids"] == [element.id]
+    workspace.close()
+
+
+def test_check_is_served_and_never_mutates(base_url):
+    before = json.loads(get(f"{base_url}/api/page?page=0"))
+    assert json.loads(get(f"{base_url}/api/check?page=0")) == {"findings": []}
+    after = json.loads(get(f"{base_url}/api/page?page=0"))
+
+    assert before["page"] == after["page"]
