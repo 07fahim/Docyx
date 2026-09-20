@@ -360,6 +360,12 @@ Four rules, none of them negotiable:
 
 Both are in `docyx.workspace`'s CLI too. This is the same failure shape as the `HF_HOME` trap above: a misconfiguration that a broad `except` turns into "found nothing".
 
+**Confidence cannot detect a wrong language either — measured, and it is the reason the warning above is the *only* guard.** The obvious next step is to flag a page whose OCR confidence is low and say "maybe you named the wrong language". On the real Bangladesh Bank scan, mean OCR confidence is **0.870 read as `eng`** (CER 0.649, zero Bengali recovered) against **0.916 read as `ben+eng`** (CER 0.075). A 0.046 gap between garbage and correct. Tesseract is *confidently* wrong, which is the whole reason this failure mode is dangerous.
+
+What does move is how many lines survive `--ocr-min-confidence`: 19 with `eng` against 33 with `ben+eng`, and on `wiki_ar.pdf` p6 five against fifty-eight. But with no expected line count there is no threshold to put on it, so it stays an observation.
+
+*(A first pass at this measured the mean over `page.elements`, which also holds the visual detector's output, and produced an apparent 0.690/0.769 split that looked shippable. It was an artefact. Measure OCR confidence over the OCR elements.)*
+
 **`--ocr` will not guess the language, and that was measured rather than assumed.** Tesseract's OSD detects script from the page image and gets 5 of 6 corpus pages right — `wiki_bn` Bengali at 69.5, `wiki_ar` Arabic at 45.2, Latin pages correctly. It fails on **the one page that matters**: `.corpus/real/81_Annexure-1.pdf`, the actual Bangladesh Bank scan, comes back `Latin` at confidence 0.88. A born-digital page flattened to pixels is clean and single-script; a real mixed Bengali/English scan is neither, and that is exactly the input auto-detection exists to serve. So the flag stays explicit.
 
 **Measured** with `scripts/measure_ocr.py`, which destroys a born-digital page's text layer by rendering it to pixels, reads it back with OCR, and scores against the native text it just threw away:
