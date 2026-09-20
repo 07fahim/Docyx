@@ -4,6 +4,7 @@ from typing import Callable, Iterable, List, Optional, Tuple, Union
 from docyx.analysis.layout import LayoutAnalyzer
 from docyx.analysis.ocr import OCRAnalyzer
 from docyx.analysis.reading_order import TEXT_ROLES, ReadingOrderCalculator
+from docyx.analysis.table_geometry import find_tables
 from docyx.analysis.tables import TableAnalyzer
 from docyx.analysis.visual import VisualAnalyzer
 from docyx.core.metadata import ProvenanceSource
@@ -22,6 +23,7 @@ class DocyxPipeline:
         visual_analyzer: Optional[VisualAnalyzer] = None,
         ocr_analyzer: Optional[OCRAnalyzer] = None,
         ocr_repair: bool = False,
+        table_geometry: bool = False,
     ):
         self.gate = TextLayerGate()
         self.layout_analyzer = layout_analyzer or LayoutAnalyzer()
@@ -32,6 +34,11 @@ class DocyxPipeline:
         self.ocr_analyzer = ocr_analyzer
         # Off by default: replacing exact text with inferred text is a choice.
         self.ocr_repair = ocr_repair
+        # Also off by default. Region detection is validated against three
+        # labelled tables and nine pages known to hold none; that is enough to
+        # offer it and not enough to change what every existing caller gets,
+        # because a false table silently reorders a page that was correct.
+        self.table_geometry = table_geometry
 
     def process(
         self,
@@ -223,6 +230,17 @@ class DocyxPipeline:
                     diagnostic_elements=native,
                 )
 
+        # Table structure from line geometry, once the lines exist. It runs
+        # here rather than through the `detector` seam because that seam takes
+        # a page image and this needs the text positions Docyx already has —
+        # and it yields to an injected model, which had the image and the
+        # first say.
+        if self.table_geometry and not any(el.type == "table" for el in detected):
+            geometric, warning = _safely_lines("table_geometry", find_tables, native, page_num)
+            detected.extend(geometric)
+            if warning:
+                warnings.append(warning)
+
         elements = _assemble(native, detected)
         return Page(
             page_number=page_num + 1,
@@ -239,6 +257,19 @@ class DocyxPipeline:
 #: Warnings OCR can fix. TEXT_LAYER_SUSPECT is excluded: there the glyphs
 #: themselves may be undecodable, so OCR might not help.
 REPAIRABLE_CODES = frozenset({"RTL_VISUAL_ORDER", "COMBINING_MARK_ORDER"})
+
+
+def _safely_lines(
+    stage: str,
+    run: Callable[..., List[Element]],
+    lines: List[Element],
+    page_num: int,
+) -> Tuple[List[Element], Optional[PageIssue]]:
+    """`_safely` for a stage that reads extracted lines rather than pixels."""
+    try:
+        return run(lines, page_num=page_num), None
+    except Exception as exc:  # same contract: degrade the page, never the document
+        return [], PageIssue(code="STAGE_FAILED", stage=stage, message=str(exc))
 
 
 def _safely(

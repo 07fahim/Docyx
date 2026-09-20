@@ -141,7 +141,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--tables",
         action="store_true",
-        help="detect table structure with Table Transformer (needs the model stack)",
+        help=(
+            "detect tables. Uses line geometry, which needs nothing extra; "
+            "Table Transformer instead when the model stack is installed"
+        ),
     )
     parser.add_argument(
         "--layout",
@@ -217,10 +220,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             layout_analyzer = LayoutAnalyzer(detector=DocLayNetDetector())
         if args.tables:
-            from docyx.analysis.detectors.table_transformer import TableTransformerDetector
-            from docyx.analysis.tables import TableAnalyzer
+            # The model is preferred only because it had the page image and so
+            # gets the first say; measured, it does not beat the geometry pass
+            # (scripts/measure_tables.py). Its absence is not an error.
+            try:
+                from docyx.analysis.detectors.table_transformer import (
+                    TableTransformerDetector,
+                )
+                from docyx.analysis.tables import TableAnalyzer
 
-            table_analyzer = TableAnalyzer(detector=TableTransformerDetector())
+                table_analyzer = TableAnalyzer(detector=TableTransformerDetector())
+            except ImportError:
+                pass
     except ImportError as exc:
         parser.error(str(exc))
 
@@ -229,6 +240,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         table_analyzer=table_analyzer,
         ocr_analyzer=ocr,
         ocr_repair=args.ocr_repair,
+        table_geometry=args.tables,
     )
     worst = 0
 

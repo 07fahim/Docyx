@@ -199,6 +199,15 @@ def score_page(path: Path, analyzer: TableAnalyzer) -> dict:
     used = {index for content in cells.values() for index in content}
     predicted = predicted_cells(page, lines)
 
+    # The shipped model-free path, scored the honest way: it is given nothing,
+    # and has to find the region itself. The `naive` column below is handed the
+    # table's lines, so only this one is a like-for-like comparison with the
+    # model beside it.
+    shipped_page = DocyxPipeline(table_geometry=True).process(
+        str(pdf), truth["document"], pages=[truth["page"]]
+    ).pages[0]
+    shipped = predicted_cells(shipped_page, neutral_lines(shipped_page))
+
     # The baseline is handed `used`; the model had to find the table itself.
     # Coverage separates those two failures, so "naive wins" can be read
     # correctly: a model that scores badly with coverage 1.0 got the structure
@@ -212,6 +221,7 @@ def score_page(path: Path, analyzer: TableAnalyzer) -> dict:
         "found": len(predicted),
         "coverage": len(covered & used) / len(used) if used else 0.0,
         "model": score(cells, predicted),
+        "shipped": score(cells, shipped),
         "naive": score(cells, geometry_grid(lines, used)),
         "warnings": [w.code for w in page.warnings],
     }
@@ -239,7 +249,7 @@ def main() -> int:
 
     print(f"\n{'table':22s} {'shape':>6s} {'cells':>5s} {'found':>5s} {'cov':>5s} |"
           f" {'cell P':>6s} {'R':>6s} {'F1':>6s} | {'adj P':>6s} {'R':>6s} {'F1':>6s}"
-          f" | {'naive':>6s}")
+          f" | {'shipped':>7s} | {'naive':>6s}")
     for r in results:
         cp, cr, cf = r["model"][0]
         ap, ar, af = r["model"][1]
@@ -247,16 +257,19 @@ def main() -> int:
         print(f"{r['page']:22s} {r['shape']:>6s} {r['cells']:5d} {r['found']:5d}"
               f" {r['coverage']:5.2f} |"
               f" {cp:6.3f} {cr:6.3f} {cf:6.3f} | {ap:6.3f} {ar:6.3f} {af:6.3f}"
-              f" | {r['naive'][1][2]:6.3f}{flag}")
+              f" | {r['shipped'][1][2]:7.3f} | {r['naive'][1][2]:6.3f}{flag}")
         if r["warnings"]:
             print(f"{'':22s} warnings: {', '.join(r['warnings'])}")
 
     def mean(pick):
         return sum(pick(r) for r in results) / len(results)
 
-    print(f"\n  mean cell F1 {mean(lambda r: r['model'][0][2]):.3f}"
-          f"   mean adj F1 {mean(lambda r: r['model'][1][2]):.3f}"
-          f"   (naive adj F1 {mean(lambda r: r['naive'][1][2]):.3f})")
+    print(f"\n  model   adj F1 {mean(lambda r: r['model'][1][2]):.3f}"
+          "   needs torch + 110M weights, and is handed nothing else")
+    print(f"  shipped adj F1 {mean(lambda r: r['shipped'][1][2]):.3f}"
+          "   model-free, finds its own region  <- the like-for-like comparison")
+    print(f"  naive   adj F1 {mean(lambda r: r['naive'][1][2]):.3f}"
+          "   handed the table's lines; an upper bound, not a competitor")
     print("  quote both: cell F1 is blind to a table shredded into correct pieces")
     print("  `cov` is the share of labelled table lines the model put in SOME cell,")
     print("  which separates 'never saw the rows' from 'got the structure wrong'.")

@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (305 tests, ~35s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (313 tests, ~35s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -104,6 +104,7 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/dump_lines.py .corpus/x.pdf 3   # 
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_reading_order.py        # tau + adjacency
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_types.py               # semantic roles, per class
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_tables.py              # table structure (needs models)
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_table_regions.py       # does it fire ONLY on tables
 PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
@@ -330,6 +331,28 @@ Two numbers: `cell` (a predicted cell counts only when its line set exactly equa
 - **Losing the header row happens on all three** (`cov` 0.76 / 0.89 / 0.94). It is the one defect worth fixing.
 
 **The baseline must be able to win, or the comparison proves nothing.** The first version used "one cell per line, one column", which scored 0.005 and could never have flagged anything — the same vacuous-fixture trap that `bad photocopy` exists to prevent in the OCR sweep. `arxiv_attention` p5 is where the model does edge ahead (0.857 vs 0.852), so the flag demonstrably both fires and doesn't.
+
+### Tables with no model
+
+[docyx/analysis/table_geometry.py](docyx/analysis/table_geometry.py) recovers tables from **text-line geometry**, behind `--tables` / `DocyxPipeline(table_geometry=True)`. No weights, no download, 7 ms/page.
+
+It exists because the scorer above said the model was not buying structure. Scored the honest way — finding its own region, no truth handed to it — it **beats Table Transformer**:
+
+| | adj F1 | |
+|---|---|---|
+| `table-geometry-v1` | **0.749** | model-free, finds its own region |
+| Table Transformer | 0.731 | torch + 110M weights |
+| naive (handed the table's lines) | 0.766 | an upper bound, not a competitor |
+
+On `arxiv_gpt3` p7 it scores **1.000 with all 72 cells**, where the model gets 64 because it drops the header row.
+
+**The seam still wins.** An injected model had the page image and gets the first say; the geometry pass runs only when no `table` element exists. Pinned by `test_a_table_yields_to_an_injected_model`.
+
+**Finding the region is the whole problem, and precision is graded first** (`scripts/measure_table_regions.py`): a missed table costs a feature, while a two-column page called a table silently reorders a page that was correct. Currently 1.00 coverage on the three labelled tables and **zero false tables across nine pages that have none**.
+
+**The discriminator is width *variation*, not width.** `MAX_FILL` looked sufficient until a two-column abstract measured 0.84 against a real table's 0.80 — inseparable. Prose lines all run to the same measure (CV 0.32); table cells do not (0.52–0.75); equations and diagram labels vary more than either (0.98, 1.12). A table is bounded on both sides.
+
+**It is off by default, and that is the honest call.** Every time the adversarial page list grew, a new false-positive class appeared — title-page author grids, running heads, figure labels, then displayed equations, found only when I looked at whole documents instead of six pages. Three labelled tables is enough to offer this and not enough to change what every existing caller gets. Assume more classes remain unfound.
 
 **3 tables is an instrument, not a benchmark**, and one of the three is deliberately the hardest page in the corpus. The metric itself is unit-tested without weights in [tests/test_table_transformer.py](tests/test_table_transformer.py) — a scorer nobody can check is worth no more than the score it prints.
 
