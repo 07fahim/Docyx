@@ -50,6 +50,17 @@ class PDFRenderer:
         self._cached_page: Optional[int] = None
         self._cached = None
 
+    def permits_extraction(self) -> bool:
+        """Does the document's own permission bitfield allow copying text?
+
+        An owner password restricts permissions without restricting access, so
+        this is a claim the file makes rather than a lock it enforces -- and
+        essentially every tool ignores it. Docyx reports it instead of either
+        obeying it silently or ignoring it silently, which is the same contract
+        it applies to a text layer that lies.
+        """
+        return bool(self.doc.permissions & fitz.PDF_PERM_COPY)
+
     def page_count(self) -> int:
         """Declared here so callers need not reach through to the fitz document."""
         return len(self.doc)

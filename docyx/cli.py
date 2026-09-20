@@ -98,6 +98,9 @@ def summarise(document: Document) -> str:
         counts[page.status.value] += 1
     issues = sorted(
         {issue.code for page in document.pages for issue in page.warnings + page.errors}
+        # Document-level issues too, or a warning nobody reads the JSON for is
+        # invisible -- which defeats the point of warning rather than blocking.
+        | {issue.code for issue in document.issues}
     )
     line = f"{document.document_id}: {len(document.pages)} pages — " + ", ".join(
         f"{n} {name}" for name, n in counts.items() if n

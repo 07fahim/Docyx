@@ -54,7 +54,7 @@ def test_parse_pages(spec, expected):
 
 def test_clean_document_exits_zero(text_pdf, capsys):
     assert main([str(text_pdf), "-q"]) == 0
-    assert json.loads(capsys.readouterr().out)["schema_version"] == "1.8"
+    assert json.loads(capsys.readouterr().out)["schema_version"] == "1.9"
 
 
 def test_a_failed_page_exits_one(scanned_pdf, capsys):
@@ -281,3 +281,17 @@ def test_every_tree_format_creates_its_parent_too(tmp_path):
         target = tmp_path / fmt / "nested" / "out"
         assert main([str(source), "-f", fmt, "-o", str(target)]) == 0
         assert any(target.iterdir())
+
+
+def test_a_document_level_issue_reaches_the_summary(tmp_path, capsys):
+    """A warning nobody reads the JSON for is invisible, which defeats the
+    point of warning rather than blocking."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "restricted", fontsize=11)
+    source = tmp_path / "no_copy.pdf"
+    doc.save(str(source), encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="owner",
+             permissions=fitz.PDF_PERM_ACCESSIBILITY)
+    doc.close()
+
+    assert main([str(source), "-o", str(tmp_path / "out.json")]) == 0
+    assert "EXTRACTION_NOT_PERMITTED" in capsys.readouterr().err

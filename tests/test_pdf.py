@@ -322,3 +322,39 @@ def test_unreadable_files_raise_rather_than_returning_an_empty_document(
 
     with pytest.raises(Exception):
         PDFRenderer(str(path))
+
+
+def test_a_document_that_forbids_copying_is_reported_not_blocked(tmp_path):
+    """A claim the file makes, not a lock it enforces.
+
+    Owner passwords restrict permissions without restricting access and every
+    tool ignores them — so Docyx neither obeys silently nor ignores silently,
+    the same contract it applies to a text layer that lies.
+    """
+    from docyx.pipeline.extractor import DocyxPipeline
+
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "restricted", fontsize=11)
+    path = tmp_path / "no_copy.pdf"
+    doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="owner",
+             permissions=fitz.PDF_PERM_ACCESSIBILITY)
+    doc.close()
+
+    document = DocyxPipeline().process(str(path), "no_copy")
+
+    assert [i.code for i in document.issues] == ["EXTRACTION_NOT_PERMITTED"]
+    # Reported, not blocked: the text is still there.
+    assert document.pages[0].elements
+
+
+def test_an_ordinary_pdf_reports_no_document_issue(tmp_path):
+    """The check must be silent on the 99% case or it is noise."""
+    from docyx.pipeline.extractor import DocyxPipeline
+
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "ordinary", fontsize=11)
+    path = tmp_path / "plain.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    assert DocyxPipeline().process(str(path), "plain").issues == []

@@ -1,4 +1,4 @@
-"""The published output schema. See schema/v1.8.json for the generated form."""
+"""The published output schema. See schema/v1.9.json for the generated form."""
 
 import unicodedata
 from enum import Enum
@@ -224,10 +224,14 @@ class Page(BaseModel):
 
 
 class Document(BaseModel):
-    schema_version: str = "1.8"
+    schema_version: str = "1.9"
     document_id: str
     filename: Optional[str] = None
     #: The document's own length, which differs from len(pages) when a subset
     #: of pages was requested.
     page_count: Optional[int] = None
+    #: Issues about the document rather than any one page. A page's warnings
+    #: cannot carry these: repeating one on all 807 pages of a report is noise,
+    #: and putting it on page 1 hides it from anyone reading page 50 alone.
+    issues: List[PageIssue] = Field(default_factory=list)
     pages: List[Page] = Field(default_factory=list)

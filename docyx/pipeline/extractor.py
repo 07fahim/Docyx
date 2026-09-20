@@ -64,6 +64,25 @@ class DocyxPipeline:
                 pages=[],
             )
 
+            # A claim the file makes, not a lock it enforces: an owner password
+            # restricts permissions without restricting access, and every tool
+            # ignores it. Reported rather than obeyed silently or ignored
+            # silently -- the same contract Docyx applies to a text layer that
+            # lies. Document-level, because repeating it on all 807 pages of a
+            # report is noise and putting it on page 1 hides it from anyone
+            # reading page 50 alone.
+            if not renderer.permits_extraction():
+                doc_model.issues.append(
+                    PageIssue(
+                        code="EXTRACTION_NOT_PERMITTED",
+                        stage="input",
+                        message=(
+                            "the document's permissions forbid copying text. "
+                            "Docyx extracted it anyway; check you are entitled to."
+                        ),
+                    )
+                )
+
             wanted = range(renderer.page_count()) if pages is None else pages
             for page_num in wanted:
                 doc_model.pages.append(self._safe_page(renderer, extractor, page_num))

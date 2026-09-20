@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (326 tests, ~43s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (329 tests, ~43s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -159,7 +159,7 @@ The wide-table failure ("tabular text cuts into columns and reads down rather th
 
 ### The schema is a published contract
 
-`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` (`Page.coordinate_system`, `GridPosition.is_header`). `v1.6` (`Element.script`, `Document.filename`/`page_count`, named typography flags). `v1.7` (`Provenance.original_geometry`, which bbox editing needs to be non-destructive). `v1.8` is current — `Provenance.original_type`, the same for the block's category. All additive; none add a guess.
+`schema/v{version}.json` is generated from the models and committed. [tests/test_schema_contract.py](tests/test_schema_contract.py) fails if they drift — after an intentional schema change, regenerate with `python -m docyx.schema.contract --write` and decide whether §19 requires a version bump. Older versions are kept as the record of what earlier branches emit: `v1.1` (pre-`PageIssue`), `v1.2` (warnings became structured `PageIssue` records). `v1.3` (`Element.direction` replaced per-element `language`). `v1.4` (`Provenance.modified_by_user` and `original_text`). `v1.5` (`Page.coordinate_system`, `GridPosition.is_header`). `v1.6` (`Element.script`, `Document.filename`/`page_count`, named typography flags). `v1.7` (`Provenance.original_geometry`, which bbox editing needs to be non-destructive). `v1.8` (`Provenance.original_type`, the same for the block's category). `v1.9` is current — `Document.issues`, for facts about the document rather than any one page. All additive; none add a guess.
 
 `PageIssue` (code/stage/message) carries both errors and warnings, so consumers branch on a stable `code`, never on message text.
 
@@ -535,6 +535,10 @@ a hardcoded `born_digital` for three phases, which made it wrong on precisely th
 pages it exists to mark.
 
 **A zero-page PDF is rejected too**, in the same place. One of the real Arabic reports is a valid, unencrypted 14 MB `PDF 1.6` whose page tree resolves to nothing. Left alone, `process()` returned a `Document` with zero pages and no error, and the CLI exited **0** — because "every page produced a valid result" is vacuously true of no pages. A 14 MB file that produced nothing was being reported as a success.
+
+**A document that forbids copying is reported, not obeyed and not ignored.** An owner password sets a permission bitfield excluding text extraction — and it is a claim the file makes rather than a lock it enforces, since the file opens without a password and essentially every tool ignores it. Docyx extracts it and emits `EXTRACTION_NOT_PERMITTED`, which is the same contract it applies to a text layer that lies: say what the document claims, let the human decide. Silent on ordinary files, which all report `copy_allowed`.
+
+It is a **`Document.issues`** entry (schema v1.9), not a page warning: repeating it on all 807 pages of a report is noise, and putting it on page 1 hides it from anyone reading page 50 alone. The CLI summary prints document issues alongside page ones, or a warning nobody reads the JSON for is invisible — which would defeat warning rather than blocking.
 
 **A password-protected PDF is rejected there too.** It opens cleanly and then every page raises, which reported `1 failed [PAGE_UNREADABLE]` — indistinguishable from a damaged file, so the user chases corruption instead of finding the password. Now exit 2 with "decrypt it first". An *owner* password is deliberately not refused: it restricts permissions rather than access, the file opens without one, and rejecting it would turn away a document anyone can read.
 

@@ -288,7 +288,7 @@ def test_export_writes_every_page_including_unvisited_ones(base_url, tmp_path, p
     assert len(exported["pages"]) == 3
     assert exported["page_count"] == 3
     assert exported["pages"][0]["elements"][0]["text"] == "kept"
-    assert exported["schema_version"] == "1.8"
+    assert exported["schema_version"] == "1.9"
 
 
 def test_export_defaults_beside_the_pdf(pdf):
