@@ -3,9 +3,18 @@
 ## Active Phase
 
 **Current Phase:** 5 — Productization (workspace UI)
-**Status:** In progress. Phases 1-4 complete. The CLI shipped in phase 4 and the
-viewer's first slice on 2026-09-20. Phase 6 (OCR) was pulled forward and is
-measured, not pending.
+**Status:** Complete as of 2026-09-20. Phases 1-4 complete; the CLI shipped in
+phase 4. Phase 6 (OCR) was pulled forward and is measured, not pending, and its
+`visual_inference` criterion was struck on measurement rather than satisfied.
+
+The workspace now covers text, geometry and category editing with undo/redo,
+export, resume, a page check report, and a folder of PDFs as one session.
+
+**What is left is evidence, not features.** Reading-order truth is 8 pages and
+type truth is 5 (`scripts/measure_types.py`). **Table structure has no scorer at
+all** — a real Table Transformer is wired through the seam and nothing can say
+whether its grid is right. That is the last place in the repo still shipping a
+capability with no way to grade it.
 
 Phases 1–3 are implemented and committed; this file was never updated as they
 landed and claimed "Current Phase: None" until 2026-09-14.

@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (279 tests, ~32s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (297 tests, ~33s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -100,6 +100,7 @@ Graded against hand-labelled ground truth in `.corpus/truth/`, not against anoth
 ```bash
 PYTHONPATH=. .venv/Scripts/python.exe scripts/dump_lines.py .corpus/x.pdf 3   # labelling worksheet
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_reading_order.py        # tau + adjacency
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_types.py               # semantic roles, per class
 PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # vs Docling
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
@@ -610,7 +611,7 @@ No revert button, deliberately: `original_text` makes one trivial, but re-applyi
 
 **Phase 6's `visual_inference` criterion was measured and struck.** See **Typography from pixels** below; the roadmap now asks only that `ocr` become active, which it is.
 
-**The remaining debt is evidence, not features.** Reading-order truth is still 8 pages; one real scan is measured; and there is no scorer for semantic roles or table structure — so the type editing and the heading suggester both ship with nothing that can tell you whether their output is right. That is the trap the reading-order harness exists to avoid. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
+**The remaining debt is evidence, not features.** Reading-order truth is 8 pages and type truth is 5; one real scan is measured; and **table structure still has no scorer at all** — `TableAnalyzer` ships a working Table Transformer detector and nothing can say whether its grid is right. That is the trap the reading-order and type harnesses exist to avoid, and it is now the only place left in the repo that is still in it. The two root markdown plans are the authoritative spec and cross-reference each other by section number — read together, neither is self-contained:
 
 - `universal_page_document_metadata_extraction_plan_v6.md` — architecture, pipeline, schema
 - `universal_page_metadata_extraction_tool_uiux_plan_v3.md` — the phase-5 workspace UI
