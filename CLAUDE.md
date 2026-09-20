@@ -352,6 +352,16 @@ Renders each page with its extracted elements drawn over it; click a box to see 
 
 `http.server` from the stdlib, deliberately: one image, one JSON blob and one HTML file do not justify a fifth core dependency. The routes are thin so FastAPI can replace it when uploads, auth or concurrency arrive.
 
+**The design tokens live in `:root` in [index.html](docyx/workspace/static/index.html) and nowhere else** — there is no `DESIGN.md`, because a second file listing the same hex values can only drift from the one the browser actually reads. The surface/ink/hairline/radius ladders are Linear's, taken from getdesign.md's public analysis; the landing-page half of that system (96px sections, 80px display type, card padding) was deliberately left behind, because this is a dense inspection surface and applying marketing rhythm to it is how the viewer would end up looking templated. Nothing third-party is vendored — no fonts, no CSS, just the numbers.
+
+Three rules hold the UI together, and each one is load-bearing rather than decorative:
+
+- **Monospace only where the interface quotes the machine.** Codes, values, coordinates and JSON are Consolas; anything Docyx says in its own voice is the UI sans. It is the provenance story — read values vs. computed ones — carried into type.
+- **Lavender `--accent` is chrome, never data.** Focus rings previously used the `detected` blue, which made a focus ring and a detector's claim the same colour. For the same reason `edited` sits magenta-side of the lavender.
+- **The tier hues are a schema contract**, so they stay saturated while everything around them is neutral. They *are* the data; the census in the footer counts them and doubles as the filter.
+
+Selecting an element scrims the page around it rather than tinting it, so the element's own pixels stay at full contrast — checking a claim against the pixels it came from is the whole job.
+
 Editing is not wired up yet. The schema is ready for it — `edit_text()`, `modified_by_user`, `original_text`, `source: manual`.
 
 ## Planning docs

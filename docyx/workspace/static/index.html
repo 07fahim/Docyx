@@ -1,160 +1,453 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Docyx workspace</title>
 <style>
+  /* Surface, ink, hairline and radius ladders are Linear's, via getdesign.md.
+     The landing-page half of that system (96px sections, 80px display type)
+     is deliberately not here: this is a dense inspection surface. */
   :root {
-    --bg: #14161a; --panel: #1b1e24; --line: #2a2f38;
-    --ink: #e6e9ef; --dim: #8b93a1;
-    --exact: #4ade80; --detected: #60a5fa; --inferred: #fbbf24; --edited: #c084fc;
+    --bench: #010102;
+    --surface-1: #0f1011; --surface-3: #18191a;
+    --hair: #23252a; --hair-strong: #34343a;
+    --ink: #f7f8f8; --ink-muted: #d0d6e0; --ink-subtle: #8a8f98;
+    --ink-tertiary: #62666d;
+
+    /* Lavender is chrome, never data — brand mark and focus rings only.
+       Focus previously used the `detected` blue, which made a focus ring
+       and a detector's claim the same colour. */
+    --accent: #5e6ad2;
+
+    /* Tiers are a schema contract, not a palette choice: saturated on
+       purpose, because they ARE the data. `edited` sits magenta-side of
+       the lavender so a focus ring can never be read as an edit. */
+    --exact: #1fbf62; --detected: #4b90f7; --inferred: #f2a413;
+    --edited: #cc66f0; --fail: #e5484d;
+
+    --r-xs: 4px; --r-md: 8px;
+
+    /* Segoe UI speaks for Docyx. Consolas quotes the machine. Never mixed. */
+    --voice: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --machine: "Cascadia Mono", ui-monospace, Consolas, monospace;
   }
+
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-         height: 100vh; display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px;
-           border-bottom: 1px solid var(--line); background: var(--panel); }
-  header b { font-weight: 600; }
+  html { scrollbar-color: var(--hair-strong) transparent; scrollbar-width: thin; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bench); color: var(--ink);
+    font: 13px/1.55 var(--voice); display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A label is Docyx naming something. Small, tracked, quiet. */
+  .label {
+    font: 600 10px/1 var(--voice); letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-tertiary);
+  }
+  .mono { font-family: var(--machine); font-variant-numeric: tabular-nums; }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── bench header ───────────────────────────────────────────── */
+  header { background: var(--surface-1); border-bottom: 1px solid var(--hair); }
+  .bar {
+    display: flex; align-items: baseline; gap: 14px; padding: 12px 16px;
+  }
+  .mark {
+    font: 700 11px/1 var(--voice); letter-spacing: .22em; color: var(--ink);
+    padding-right: 14px; border-right: 1px solid var(--hair-strong);
+  }
+  #file { font-family: var(--machine); font-size: 13px; }
+  .verdict { display: flex; align-items: baseline; gap: 8px; }
+  .verdict b {
+    font: 600 11px/1 var(--voice); letter-spacing: .08em; text-transform: uppercase;
+  }
+  .v-ok b { color: var(--exact); } .v-partial b { color: var(--inferred); }
+  .v-failed b { color: var(--fail); }
   .grow { flex: 1; }
-  button { background: #262b33; color: var(--ink); border: 1px solid var(--line);
-           border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit; }
-  button:hover:not(:disabled) { background: #2f3540; }
-  button:disabled { opacity: .35; cursor: default; }
+
+  nav { display: flex; align-items: center; gap: 4px; }
+  button {
+    background: none; color: var(--ink-subtle); border: 1px solid transparent;
+    border-radius: var(--r-xs); padding: 4px 8px; cursor: pointer; font: inherit;
+  }
+  button:hover:not(:disabled) { color: var(--ink); background: var(--surface-3); }
+  button:disabled { opacity: .3; cursor: default; }
+  #pageno { font-family: var(--machine); font-variant-numeric: tabular-nums;
+            color: var(--ink-subtle); font-size: 12px; min-width: 66px; text-align: center; }
+
+  /* The page's composition, by count. No labels — the census below names them. */
+  /* Composition, not verdict: the word in the header and the banner carry
+     that. Kept dim so a green bar can never outshout a PARTIAL status. */
+  #trust { display: flex; height: 2px; background: var(--bench); opacity: .6; }
+  #trust div { transition: opacity .15s; }
+
+  /* ── bench + rail ───────────────────────────────────────────── */
   main { flex: 1; display: flex; min-height: 0; }
-  #canvasWrap { flex: 1; overflow: auto; padding: 20px; display: flex;
-                justify-content: center; align-items: flex-start; }
-  canvas { background: #fff; box-shadow: 0 2px 24px #0008; }
-  aside { width: 400px; border-left: 1px solid var(--line); background: var(--panel);
-          overflow: auto; padding: 14px 16px; }
-  pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 12px; }
-  .muted { color: var(--dim); }
-  .legend { display: flex; gap: 14px; font-size: 12px; }
-  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
-              margin-right: 5px; vertical-align: middle; }
-  .issue { background: #3a2a1a; border: 1px solid #6b4a1f; color: #fcd9a0;
-           padding: 6px 9px; border-radius: 4px; margin-bottom: 8px; font-size: 12px; }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
-       color: var(--dim); margin: 16px 0 6px; font-weight: 600; }
+  #bench {
+    flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px; display: flex;
+    justify-content: center; align-items: flex-start;
+    background:
+      var(--bench);
+  }
+  canvas { display: block; cursor: crosshair; background: #fff;
+           box-shadow: 0 0 0 1px #0006, 0 18px 40px -16px #000c; }
+
+  aside {
+    width: 372px; flex: none; border-left: 1px solid var(--hair);
+    background: var(--surface-1); overflow: auto; padding: 0 0 20px;
+  }
+  .sect { padding: 16px; border-bottom: 1px solid var(--hair); }
+
+  .issue { display: flex; gap: 8px; padding: 12px 16px;
+           border-bottom: 1px solid var(--hair); background: #221b10; }
+  .issue.err { background: #241416; }
+  .issue span { color: var(--inferred); font-size: 12px; line-height: 1.2; }
+  .issue.err span { color: var(--fail); }
+  .issue code { font-family: var(--machine); font-size: 11px; color: var(--inferred);
+                display: block; margin-bottom: 3px; }
+  .issue.err code { color: var(--fail); }
+  .issue p { margin: 0; color: var(--ink-subtle); font-size: 12px; }
+
+  /* The claim: what this element says it is, and what it says. */
+  .claim { font-family: var(--machine); font-size: 12px; color: var(--ink-subtle); }
+  .claim b { color: var(--ink); }
+  .said {
+    margin: 8px 0 0; padding: 12px; background: var(--bench);
+    border-left: 2px solid var(--hair-strong); border-radius: 0 var(--r-md) var(--r-md) 0;
+    font-size: 14px; line-height: 1.5; word-break: break-word;
+  }
+  .said.rtl { direction: rtl; text-align: right;
+              border-left: none; border-right: 2px solid var(--hair-strong);
+              border-radius: var(--r-md) 0 0 var(--r-md); }
+  .was { color: var(--ink-tertiary); text-decoration: line-through; display: block;
+         font-size: 12px; margin-bottom: 4px; }
+
+  dl { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; margin: 0; }
+  dt { font: 600 10px/1.6 var(--voice); letter-spacing: .1em;
+       text-transform: uppercase; color: var(--ink-tertiary); }
+  dd { margin: 0; font-family: var(--machine); font-size: 12px; color: var(--ink-muted);
+       word-break: break-word; }
+  dd .sw { display: inline-block; width: 7px; height: 7px; border-radius: 2px;
+           margin-right: 6px; vertical-align: baseline; }
+
+  details summary { cursor: pointer; color: var(--ink-tertiary); list-style: none;
+                    font: 600 10px/1 var(--voice); letter-spacing: .12em;
+                    text-transform: uppercase; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "+ "; font-family: var(--machine); }
+  details[open] summary::before { content: "\2212 "; }
+  details pre { margin: 10px 0 0; padding: 10px; background: var(--bench);
+                border-radius: var(--r-md); font-family: var(--machine); font-size: 11px;
+                line-height: 1.5; color: var(--ink-subtle); white-space: pre-wrap;
+                word-break: break-word; }
+
+  .empty { color: var(--ink-tertiary); font-size: 12px; }
+  .empty kbd { font-family: var(--machine); font-size: 11px; color: var(--ink-subtle);
+               border: 1px solid var(--hair-strong); border-radius: var(--r-xs);
+               padding: 0 4px; }
+
+  /* ── census: the legend carries data, and doubles as the filter ── */
+  footer { display: flex; align-items: center; gap: 4px; padding: 8px 16px;
+           border-top: 1px solid var(--hair); background: var(--surface-1); }
+  .tier { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px;
+          border-radius: var(--r-xs); color: var(--ink-subtle); }
+  .tier i { width: 8px; height: 8px; border-radius: 2px; align-self: center; }
+  .tier b { font: 600 10px/1 var(--voice); letter-spacing: .1em;
+            text-transform: uppercase; }
+  .tier span { font-family: var(--machine); font-variant-numeric: tabular-nums;
+               font-size: 12px; color: var(--ink-tertiary); }
+  .tier[aria-pressed="false"] { opacity: .32; }
+  .tier:hover { background: var(--surface-3); color: var(--ink); }
+
+  @media (max-width: 860px) {
+    main { flex-direction: column; }
+    aside { width: auto; border-left: none; border-top: 1px solid var(--hair); }
+    .bar { flex-wrap: wrap; gap: 8px 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
 <header>
-  <b id="file">—</b>
-  <span class="muted" id="status"></span>
-  <span class="grow"></span>
-  <div class="legend">
-    <span><i style="background:var(--exact)"></i>exact</span>
-    <span><i style="background:var(--detected)"></i>detected</span>
-    <span><i style="background:var(--inferred)"></i>inferred</span>
-    <span><i style="background:var(--edited)"></i>edited</span>
+  <div class="bar">
+    <span class="mark">DOCYX</span>
+    <span id="file">&mdash;</span>
+    <span class="verdict" id="verdict"></span>
+    <span class="grow"></span>
+    <nav>
+      <button id="prev" title="Previous page (&larr;)">&larr;</button>
+      <span id="pageno">&mdash;</span>
+      <button id="next" title="Next page (&rarr;)">&rarr;</button>
+    </nav>
   </div>
-  <span class="grow"></span>
-  <button id="prev">&larr;</button>
-  <span id="pageno" class="muted">—</span>
-  <button id="next">&rarr;</button>
+  <div id="trust"></div>
 </header>
 
 <main>
-  <div id="canvasWrap"><canvas id="c"></canvas></div>
+  <div id="bench"><canvas id="c" tabindex="0" aria-label="Page with extracted elements"></canvas></div>
   <aside>
     <div id="issues"></div>
-    <h2>Element</h2>
-    <pre id="detail" class="muted">Click a box on the page.</pre>
+    <div id="detail"></div>
   </aside>
 </main>
 
+<footer id="census"></footer>
+
 <script>
-const COLOURS = { exact: "#4ade80", detected: "#60a5fa", inferred: "#fbbf24" };
+const TIERS = {
+  exact:    { c: "#1fbf62", of: e => tier(e) === "exact" },
+  detected: { c: "#4b90f7", of: e => tier(e) === "detected" },
+  inferred: { c: "#f2a413", of: e => tier(e) === "inferred" },
+  edited:   { c: "#cc66f0", of: e => tier(e) === "edited" },
+};
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
-let state = { index: 0, elements: [], image: null, selected: null, scale: 1 };
+const $ = id => document.getElementById(id);
+
+const state = {
+  index: 0, elements: [], image: null, selected: null, hovered: null,
+  scale: 1, hidden: new Set(),
+};
+
+// An edit outranks the confidence it replaced, so it is its own tier.
+function tier(el) {
+  if (el.provenance && el.provenance.modified_by_user) return "edited";
+  return (el.confidence && el.confidence.type) || "unknown";
+}
+const colourOf = el => (TIERS[tier(el)] || { c: "#878d92" }).c;
+const shown = () => state.elements.filter(el => !state.hidden.has(tier(el)));
 
 function flatten(elements) {
-  // Cells and style runs live in `children`; they are clickable too, but the
-  // parent is drawn first so a cell sits on top of its table.
+  // Cells and style runs live in `children` and are selectable too; the
+  // parent is pushed first so the child draws on top of it.
   const out = [];
-  for (const el of elements) { out.push(el); for (const c of el.children || []) out.push(c); }
+  for (const el of elements || []) { out.push(el); out.push(...flatten(el.children)); }
   return out;
 }
 
-function colour(el) {
-  if (el.provenance && el.provenance.modified_by_user) return "#c084fc";
-  return COLOURS[el.confidence && el.confidence.type] || "#8b93a1";
-}
+/* ── the page ─────────────────────────────────────────────────── */
 
 function draw() {
   if (!state.image) return;
-  const maxW = document.getElementById("canvasWrap").clientWidth - 40;
-  state.scale = Math.min(1, maxW / state.image.width);
-  canvas.width = state.image.width * state.scale;
-  canvas.height = state.image.height * state.scale;
-  ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
+  const dpr = window.devicePixelRatio || 1;
+  const avail = $("bench").clientWidth - 48;
+  state.scale = Math.min(1, avail / state.image.width);
+  const w = Math.round(state.image.width * state.scale);
+  const h = Math.round(state.image.height * state.scale);
 
-  for (const el of state.elements) {
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.drawImage(state.image, 0, 0, w, h);
+
+  const rect = el => {
     const b = el.geometry.bbox, s = state.scale;
-    const isSel = state.selected === el;
-    ctx.lineWidth = isSel ? 2.5 : 1;
-    ctx.strokeStyle = isSel ? "#fff" : colour(el);
-    ctx.strokeRect(b.x * s, b.y * s, b.width * s, b.height * s);
-    if (isSel) {
-      ctx.fillStyle = "#ffffff22";
-      ctx.fillRect(b.x * s, b.y * s, b.width * s, b.height * s);
+    return [b.x * s, b.y * s, b.width * s, b.height * s];
+  };
+
+  // The punch-out: scrim everything except the selection, so the element's
+  // own pixels stay at full contrast and the page around it recedes.
+  if (state.selected) {
+    const [x, y, bw, bh] = rect(state.selected);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.rect(x, y, bw, bh);
+    ctx.fillStyle = "rgba(1,1,2,.46)";
+    ctx.fill("evenodd");
+    ctx.restore();
+  }
+
+  for (const el of shown()) {
+    const [x, y, bw, bh] = rect(el);
+    const sel = el === state.selected;
+    ctx.lineWidth = sel ? 1.5 : 1;
+    ctx.strokeStyle = sel ? "#fff" : (el === state.hovered ? "#ffffffaa" : colourOf(el) + "cc");
+    ctx.strokeRect(x + .5, y + .5, bw, bh);
+    if (sel) {
+      // A tick in the tier colour: the verdict stays attached to the box.
+      ctx.fillStyle = colourOf(el);
+      ctx.fillRect(x, y - 3, Math.min(bw, 18), 2);
     }
   }
 }
 
-canvas.addEventListener("click", (ev) => {
+function hit(ev) {
   const r = canvas.getBoundingClientRect();
   const x = (ev.clientX - r.left) / state.scale, y = (ev.clientY - r.top) / state.scale;
-  // Smallest hit wins, so a cell is selectable over the table containing it.
   let best = null;
-  for (const el of state.elements) {
+  for (const el of shown()) {
     const b = el.geometry.bbox;
-    if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) {
-      if (!best || b.width * b.height < best.geometry.bbox.width * best.geometry.bbox.height) best = el;
-    }
+    if (x < b.x || x > b.x + b.width || y < b.y || y > b.y + b.height) continue;
+    // Smallest hit wins, so a cell is reachable over the table holding it.
+    if (!best || b.width * b.height < best.geometry.bbox.width * best.geometry.bbox.height) best = el;
   }
-  state.selected = best;
-  document.getElementById("detail").textContent =
-    best ? JSON.stringify(best, null, 2) : "Click a box on the page.";
-  document.getElementById("detail").className = best ? "" : "muted";
-  draw();
+  return best;
+}
+
+canvas.addEventListener("click", ev => select(hit(ev)));
+canvas.addEventListener("mousemove", ev => {
+  const h = hit(ev);
+  if (h !== state.hovered) { state.hovered = h; draw(); }
 });
+canvas.addEventListener("mouseleave", () => { state.hovered = null; draw(); });
+
+/* ── the inspector ────────────────────────────────────────────── */
+
+function select(el) {
+  state.selected = el;
+  render(el);
+  draw();
+}
+
+function row(dl, label, value) {
+  if (value === null || value === undefined || value === "") return;
+  dl.insertAdjacentHTML("beforeend",
+    `<dt>${label}</dt><dd>${value}</dd>`);
+}
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function render(el) {
+  const box = $("detail");
+  if (!el) {
+    box.innerHTML = `<div class="sect"><div class="label">Element</div>
+      <p class="empty">Click a box, or press <kbd>&darr;</kbd> to walk the page
+      in reading order.</p></div>`;
+    return;
+  }
+  const t = tier(el), p = el.provenance || {}, c = el.confidence || {};
+  const ty = el.typography || {}, lay = el.layout || {};
+  const styles = ["bold", "italic", "serif", "monospace", "superscript"]
+    .filter(k => ty[k]).join(" · ");
+
+  box.innerHTML = `<div class="sect">
+    <div class="label" style="margin-bottom:7px">Element</div>
+    <div class="claim"><b>${esc(el.type)}</b>${el.id ? ` &middot; ${esc(el.id)}` : ""}</div>
+    ${el.text ? `<div class="said${el.direction === "rtl" ? " rtl" : ""}">${
+      p.original_text ? `<span class="was">${esc(p.original_text)}</span>` : ""
+    }${esc(el.text)}</div>` : ""}
+  </div>
+  <div class="sect"><dl id="kv"></dl></div>
+  <div class="sect"><details><summary>Raw JSON</summary><pre></pre></details></div>`;
+
+  const dl = $("kv");
+  row(dl, "Trust", `<span class="sw" style="background:${colourOf(el)}"></span>${t}` +
+    (c.value !== undefined ? ` ${Number(c.value).toFixed(2)}` : ""));
+  row(dl, "Source", esc(p.source || "&mdash;"));
+  row(dl, "Engine", p.engine ? esc(p.engine) + (p.version ? ` ${esc(p.version)}` : "") : null);
+  row(dl, "Raw score", p.raw_confidence !== undefined && p.raw_confidence !== null
+    ? Number(p.raw_confidence).toFixed(3) : null);
+  row(dl, "Order", el.reading_order);
+  row(dl, "Script", el.script);
+  row(dl, "Direction", el.direction);
+  row(dl, "Font", ty.font_family
+    ? `${esc(ty.font_family)}${ty.font_size ? ` ${+ty.font_size.toFixed(1)}pt` : ""}` : null);
+  row(dl, "Style", styles || null);
+  row(dl, "Align", lay.alignment);
+  row(dl, "Indent", lay.indent !== undefined && lay.indent !== null
+    ? Math.round(lay.indent) + "px" : null);
+  if (el.grid) row(dl, "Cell", `r${el.grid.row} c${el.grid.column}` +
+    (el.grid.row_span > 1 || el.grid.column_span > 1
+      ? ` span ${el.grid.row_span}×${el.grid.column_span}` : "") +
+    (el.grid.is_header ? " &middot; header" : ""));
+  const b = el.geometry.bbox;
+  row(dl, "Box", `${Math.round(b.x)} ${Math.round(b.y)} ` +
+    `${Math.round(b.width)}×${Math.round(b.height)}`);
+  if (el.children && el.children.length) row(dl, "Children", el.children.length);
+
+  box.querySelector("pre").textContent = JSON.stringify(el, null, 2);
+}
+
+/* ── census and trust bar ─────────────────────────────────────── */
+
+function census() {
+  const counts = {}, total = state.elements.length;
+  for (const el of state.elements) counts[tier(el)] = (counts[tier(el)] || 0) + 1;
+
+  $("trust").innerHTML = Object.keys(TIERS).map(k => counts[k]
+    ? `<div style="flex:${counts[k]};background:${TIERS[k].c};opacity:${
+        state.hidden.has(k) ? .2 : 1}"></div>` : "").join("")
+    || `<div style="flex:1;background:var(--hair)"></div>`;
+
+  $("census").innerHTML = Object.keys(TIERS).map(k =>
+    `<button class="tier" data-tier="${k}" aria-pressed="${!state.hidden.has(k)}"
+       title="${counts[k] || 0} of ${total} &mdash; click to hide">
+       <i style="background:${TIERS[k].c}"></i><b>${k}</b><span>${counts[k] || 0}</span>
+     </button>`).join("");
+
+  for (const btn of $("census").children) btn.onclick = () => {
+    const k = btn.dataset.tier;
+    state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k);
+    if (state.selected && state.hidden.has(tier(state.selected))) select(null);
+    census(); draw();
+  };
+}
+
+/* ── page load ────────────────────────────────────────────────── */
 
 async function load(index) {
   const res = await fetch(`/api/page?page=${index}`);
   const data = await res.json();
-  if (data.error) { document.getElementById("status").textContent = data.error; return; }
-
-  state.index = data.index;
-  state.selected = null;
-  state.elements = flatten(data.page.elements || []).concat(
-    flatten(data.page.diagnostic_elements || []));
-
-  document.getElementById("file").textContent = data.filename || "(stream)";
-  document.getElementById("pageno").textContent = `${data.index + 1} / ${data.page_count}`;
-  document.getElementById("prev").disabled = data.index === 0;
-  document.getElementById("next").disabled = data.index >= data.page_count - 1;
+  if (data.error) {
+    $("verdict").className = "verdict v-failed";
+    $("verdict").innerHTML = `<b>${esc(data.error)}</b>`;
+    return;
+  }
 
   const p = data.page;
-  document.getElementById("status").textContent =
-    `${p.status} · ${p.source_type} · ${state.elements.length} elements`;
+  state.index = data.index;
+  state.selected = state.hovered = null;
+  state.elements = flatten(p.elements).concat(flatten(p.diagnostic_elements));
 
-  const issues = (p.errors || []).concat(p.warnings || []);
-  document.getElementById("issues").innerHTML = issues
-    .map(i => `<div class="issue"><b>${i.code}</b><br>${i.message}</div>`).join("");
+  $("file").textContent = data.filename || "(stream)";
+  $("pageno").textContent = `${data.index + 1} / ${data.page_count}`;
+  $("prev").disabled = data.index === 0;
+  $("next").disabled = data.index >= data.page_count - 1;
 
-  document.getElementById("detail").textContent = "Click a box on the page.";
-  document.getElementById("detail").className = "muted";
+  $("verdict").className = `verdict v-${p.status}`;
+  $("verdict").innerHTML =
+    `<b>${esc(p.status)}</b><span class="label">${esc(p.source_type)}</span>`;
+
+  const issues = (p.errors || []).map(i => [i, "err"])
+    .concat((p.warnings || []).map(i => [i, ""]));
+  $("issues").innerHTML = issues.map(([i, cls]) =>
+    `<div class="issue ${cls}"><span>&#9888;</span><div>
+       <code>${esc(i.code)}</code><p>${esc(i.message)}</p></div></div>`).join("");
+
+  census();
+  render(null);
 
   const img = new Image();
   img.onload = () => { state.image = img; draw(); };
   img.src = `/api/image?page=${index}`;
 }
 
-document.getElementById("prev").onclick = () => load(state.index - 1);
-document.getElementById("next").onclick = () => load(state.index + 1);
-document.addEventListener("keydown", (e) => {
+/* Up/Down walks reading order — the thing this project actually measures. */
+function step(delta) {
+  const list = shown().slice().sort((a, b) => {
+    const ao = a.reading_order, bo = b.reading_order;
+    if (ao === bo) return a.geometry.bbox.y - b.geometry.bbox.y;
+    if (ao === null || ao === undefined) return 1;
+    if (bo === null || bo === undefined) return -1;
+    return ao - bo;
+  });
+  if (!list.length) return;
+  const at = list.indexOf(state.selected);
+  select(list[Math.max(0, Math.min(list.length - 1, at + delta))] || list[0]);
+  canvas.scrollIntoView({ block: "nearest" });
+}
+
+$("prev").onclick = () => load(state.index - 1);
+$("next").onclick = () => load(state.index + 1);
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SUMMARY") return;
   if (e.key === "ArrowLeft" && state.index > 0) load(state.index - 1);
-  if (e.key === "ArrowRight") load(state.index + 1);
+  else if (e.key === "ArrowRight" && !$("next").disabled) load(state.index + 1);
+  else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); step(-1); }
+  else if (e.key === "Escape") select(null);
+  else return;
 });
 window.addEventListener("resize", draw);
 load(0);
