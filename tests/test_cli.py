@@ -4,6 +4,7 @@ Exit codes are the contract for anything scripted, so they are tested harder
 than the output formatting.
 """
 
+import argparse
 import json
 from pathlib import Path
 
@@ -178,3 +179,58 @@ def test_layout_and_table_flags_exist():
 def test_the_model_flags_do_not_break_a_run_without_them(text_pdf, tmp_path):
     """Default stays stub-detectors and four core dependencies."""
     assert main([str(text_pdf), "-o", str(tmp_path / "a.json"), "-q"]) == 0
+
+
+# --- the --ocr flag ---------------------------------------------------------
+
+
+def test_a_pdf_passed_as_the_language_names_the_right_mistake():
+    """`docyx --ocr scan.pdf` swallows the PDF as the language, and argparse
+    then reports the PDF as missing — blaming the argument you did supply."""
+    from docyx.cli import ocr_language
+
+    with pytest.raises(argparse.ArgumentTypeError) as exc:
+        ocr_language("scan.pdf")
+
+    assert "looks like a file" in str(exc.value)
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        ocr_language("some/dir/scan.PDF")
+
+
+def test_a_real_language_code_passes_through():
+    from docyx.cli import ocr_language
+
+    assert ocr_language("ben+eng") == "ben+eng"
+    assert ocr_language("ara") == "ara"
+
+
+def test_an_uninstalled_language_is_refused_before_any_page_runs(tmp_path, capsys):
+    """A missing 5 MB data file otherwise fails every page as STAGE_FAILED, so
+    the summary reads `1 failed` and the user concludes the scan is unreadable.
+    """
+    pytest.importorskip("pytesseract")
+    from docyx.analysis.detectors.tesseract import TesseractDetector
+
+    try:
+        installed = set(TesseractDetector().languages())
+    except ImportError:
+        pytest.skip("tesseract is not installed")
+
+    absent = "zzz"
+    assert absent not in installed
+
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), "hello", fontsize=11)
+    path = tmp_path / "doc.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    with pytest.raises(SystemExit) as exc:
+        main([str(path), "--ocr", absent, "-o", str(tmp_path / "out.json")])
+
+    assert exc.value.code == 2
+    message = capsys.readouterr().err
+    assert absent in message
+    # Naming what IS available is the difference between a dead end and a fix.
+    assert "Installed:" in message

@@ -2,6 +2,7 @@
 
 import argparse
 
+from docyx.cli import ocr_language
 from docyx.workspace.server import serve
 
 
@@ -16,7 +17,8 @@ def main(argv=None) -> int:
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--layout", action="store_true", help="detect layout regions")
     parser.add_argument("--tables", action="store_true", help="detect table structure")
-    parser.add_argument("--ocr", metavar="LANG", help="recognise gate-failed pages")
+    parser.add_argument("--ocr", metavar="LANG", type=ocr_language,
+                        help="recognise gate-failed pages, e.g. ben, ara, ben+eng")
     args = parser.parse_args(argv)
 
     pipeline = None
@@ -39,7 +41,16 @@ def main(argv=None) -> int:
                 from docyx.analysis.detectors.tesseract import TesseractDetector
                 from docyx.analysis.ocr import OCRAnalyzer
 
-                ocr = OCRAnalyzer(detector=TesseractDetector(lang=args.ocr), min_confidence=0.4)
+                detector = TesseractDetector(lang=args.ocr)
+                # Same reason as the main CLI: a missing language file
+                # otherwise fails every page and reads as an unreadable PDF.
+                missing = sorted(set(args.ocr.split("+")) - set(detector.languages()))
+                if missing:
+                    parser.error(
+                        f"tesseract has no data for {', '.join(missing)}. "
+                        f"Installed: {', '.join(sorted(detector.languages())) or 'none'}."
+                    )
+                ocr = OCRAnalyzer(detector=detector, min_confidence=0.4)
         except ImportError as exc:
             parser.error(str(exc))
         pipeline = DocyxPipeline(

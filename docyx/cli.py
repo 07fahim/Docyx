@@ -35,6 +35,20 @@ from docyx.pipeline.extractor import DocyxPipeline
 from docyx.schema.models import Document, PageStatus
 
 
+def ocr_language(value: str) -> str:
+    """Reject a filename where a language code belongs.
+
+    `docyx --ocr scan.pdf` otherwise swallows the PDF as the language and then
+    reports the PDF as missing, which blames the wrong argument entirely.
+    """
+    if value.lower().endswith(".pdf") or "/" in value or "\\" in value:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} looks like a file, not a language code. Write "
+            "`--ocr LANG` (ben, ara, ben+eng) and give the PDF separately."
+        )
+    return value
+
+
 def parse_pages(spec: Optional[str]) -> Optional[List[int]]:
     """Turn "0-4,9" into [0, 1, 2, 3, 4, 9]. Zero-based, matching the API."""
     if not spec:
@@ -101,9 +115,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--ocr",
         metavar="LANG",
+        type=ocr_language,
         help=(
             "recognise text on pages with no text layer, e.g. ben, ara, ben+eng. "
-            "Needs tesseract installed; such pages are `partial`, never `ok`"
+            "Needs tesseract and that language's data installed; such pages are "
+            "`partial`, never `ok`"
         ),
     )
     parser.add_argument(
@@ -172,12 +188,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         from docyx.analysis.ocr import OCRAnalyzer
 
         try:
-            ocr = OCRAnalyzer(
-                detector=TesseractDetector(lang=args.ocr),
-                min_confidence=args.ocr_min_confidence,
-            )
+            detector = TesseractDetector(lang=args.ocr)
         except ImportError as exc:
             parser.error(str(exc))
+
+        # Checked here rather than left to the page. A language tesseract does
+        # not have raises per page, which `_safely` turns into STAGE_FAILED and
+        # the summary prints as `1 failed` — so a missing 5 MB data file reads
+        # as "this scan is unreadable" instead of "install ben.traineddata".
+        installed = set(detector.languages())
+        missing = sorted(set(args.ocr.split("+")) - installed)
+        if missing:
+            parser.error(
+                f"tesseract has no data for {', '.join(missing)}. "
+                f"Installed: {', '.join(sorted(installed)) or 'none'}. "
+                "Install it with your package manager, or download the file and "
+                "point TESSDATA_PREFIX at it — see requirements-ocr.txt."
+            )
+
+        ocr = OCRAnalyzer(detector=detector, min_confidence=args.ocr_min_confidence)
 
     # Lazy: the model stack is optional.
     layout_analyzer = table_analyzer = None

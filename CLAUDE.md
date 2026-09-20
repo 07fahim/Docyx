@@ -12,7 +12,7 @@ PYTHONPATH=. .venv/Scripts/python.exe -m docyx *.pdf -o results/ -f markdown
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx scan.pdf --ocr ben   # optional OCR, see below
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx paper.pdf --layout --tables -f bundle -o out/
 PYTHONPATH=. .venv/Scripts/python.exe -m docyx book.pdf --layout -f blocks -o out/  # image + annotation pairs
-.venv/Scripts/python.exe -m pytest -q            # full suite (302 tests, ~35s)
+.venv/Scripts/python.exe -m pytest -q            # full suite (305 tests, ~35s)
 .venv/Scripts/python.exe -m docyx.schema.contract --write   # regenerate schema/v1.8.json after a schema change
 .venv/Scripts/python.exe scripts/measure_struct_tree.py CORPUS_DIR  # tagged-PDF prevalence
 .venv/Scripts/python.exe -m pytest tests/test_analysis.py::test_reading_order_sorts_top_to_bottom -v
@@ -352,6 +352,15 @@ Four rules, none of them negotiable:
 - **Tesseract, deliberately not PaddleOCR/EasyOCR** — on *runtime* footprint, not download size. It loads no Python ML framework into the process: ~1.8 GB RSS for EasyOCR and ~950 MB for PaddleOCR against tens of MB, plus 8–20 s of cold start. (The first version of this note said "~2 GB of torch", which was wrong twice: PaddleOCR runs on PaddlePaddle, and 2 GB is the CUDA build when both install from a CPU index.) Bengali accuracy was the trade expected to reverse this decision; **measured, it did not** — 0.987 against a clean reference with `tessdata_best`. Swapping engines still costs one file behind the seam if a real scan says otherwise.
 
 `lang` must match the document. `--ocr eng` on a Bengali scan does not fail — it returns confident Latin gibberish, which is worse. `--ocr-min-confidence` (default 0.4) drops low-scoring lines rather than returning them, because page speckle recognised as a one-character "word" lands mid-column and derails the reading order of everything around it.
+
+**`--ocr` is validated at parse time, and the reason is a defect that looked like something else entirely.** `--ocr ben` without `ben.traineddata` installed raised per page; `_safely` caught it as `STAGE_FAILED`, so the summary printed `1 failed` and the honest reading was *"this scan is unreadable"* rather than *"install a 5 MB data file"*. Two guards now:
+
+- The language must be in `detector.languages()`, checked before any page runs, and **the error names what *is* installed** — that is the difference between a dead end and a fix.
+- A value ending `.pdf` or containing a path separator is rejected by `type=ocr_language`. `docyx --ocr scan.pdf` otherwise swallows the PDF as the language and argparse then reports *"the following arguments are required: pdfs"*, blaming the one argument you did supply.
+
+Both are in `docyx.workspace`'s CLI too. This is the same failure shape as the `HF_HOME` trap above: a misconfiguration that a broad `except` turns into "found nothing".
+
+**`--ocr` will not guess the language, and that was measured rather than assumed.** Tesseract's OSD detects script from the page image and gets 5 of 6 corpus pages right — `wiki_bn` Bengali at 69.5, `wiki_ar` Arabic at 45.2, Latin pages correctly. It fails on **the one page that matters**: `.corpus/real/81_Annexure-1.pdf`, the actual Bangladesh Bank scan, comes back `Latin` at confidence 0.88. A born-digital page flattened to pixels is clean and single-script; a real mixed Bengali/English scan is neither, and that is exactly the input auto-detection exists to serve. So the flag stays explicit.
 
 **Measured** with `scripts/measure_ocr.py`, which destroys a born-digital page's text layer by rendering it to pixels, reads it back with OCR, and scores against the native text it just threw away:
 
