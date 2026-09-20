@@ -1,0 +1,17 @@
+{
+  "document": "wiki_ar.pdf",
+  "page": 6,
+  "checksum": "4234cbea60d6",
+  "notes": "Arabic encyclopaedia page, five section headings at two levels: 10, 28, 41 and 52 are era headings and 36 ('the Tulunids, Fatimids, Ayyubids and Mamluks') is a heading of the same rank set on one line. Lines 18, 20 and 22 are the three lines of the figure caption for the Roman theatre photograph -- the same float that caps this page's reading-order score. Line 42 is a 'main article:' hatnote, which is Text.",
+  "default": "text",
+  "types": {
+    "10": "section_header",
+    "18": "caption",
+    "20": "caption",
+    "22": "caption",
+    "28": "section_header",
+    "36": "section_header",
+    "41": "section_header",
+    "52": "section_header"
+  }
+}

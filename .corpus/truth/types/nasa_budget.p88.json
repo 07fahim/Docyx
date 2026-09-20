@@ -1,0 +1,20 @@
+{
+  "document": "nasa_budget.pdf",
+  "page": 88,
+  "checksum": "af8c97f4a674",
+  "notes": "A budget page that is almost entirely one table. Line 0 is the running head and 34 the page number. Line 1 is the page's main heading and line 2 the table's -- BOTH are Section-header, because this is page 88 and a document has one Title. That is the deliberate trap for a size-based heuristic, which has no way to know it is not on page one. Lines 3-33 are cell contents, labelled Table: the tool produces no table element without an injected model, so this page measures what a missing table model costs rather than what the heading heuristic gets wrong.",
+  "default": "text",
+  "types": {
+    "0": "page_header",
+    "1": "section_header",
+    "2": "section_header",
+    "3": "table", "4": "table", "5": "table", "6": "table", "7": "table",
+    "8": "table", "9": "table", "10": "table", "11": "table", "12": "table",
+    "13": "table", "14": "table", "15": "table", "16": "table", "17": "table",
+    "18": "table", "19": "table", "20": "table", "21": "table", "22": "table",
+    "23": "table", "24": "table", "25": "table", "26": "table", "27": "table",
+    "28": "table", "29": "table", "30": "table", "31": "table", "32": "table",
+    "33": "table",
+    "34": "page_footer"
+  }
+}

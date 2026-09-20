@@ -1,0 +1,14 @@
+{
+  "document": "wiki_bn.pdf",
+  "page": 5,
+  "checksum": "1ad1c15f16ee",
+  "notes": "Bengali encyclopaedia page. Two section headings (7 'Ancient Bengal', 11 'Islamic Bengal') and three photograph captions (8 Paharpur, 9 Mahasthangarh, 10 Mainamati). The captions are the test that matters here: they are short, isolated lines like a heading, and nothing about their size says caption.",
+  "default": "text",
+  "types": {
+    "7": "section_header",
+    "8": "caption",
+    "9": "caption",
+    "10": "caption",
+    "11": "section_header"
+  }
+}

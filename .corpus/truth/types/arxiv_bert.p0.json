@@ -1,0 +1,15 @@
+{
+  "document": "arxiv_bert.pdf",
+  "page": 0,
+  "checksum": "2f48b13d8672",
+  "notes": "Title page. Lines 2-7 are the author row, affiliation and email block: DocLayNet has no author class, so they are Text. Line 13 is the rotated arXiv stamp down the left margin, labelled Page-header as page furniture. Lines 62 and 63 are the two halves of one section heading ('1' and 'Introduction') and are both Section-header.",
+  "default": "text",
+  "types": {
+    "0": "title",
+    "1": "title",
+    "8": "section_header",
+    "13": "page_header",
+    "62": "section_header",
+    "63": "section_header"
+  }
+}

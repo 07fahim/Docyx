@@ -42,10 +42,14 @@ is true.
         ...
 """
 
+import re
 from collections import Counter
 from typing import List, Optional, Tuple
 
 from docyx.schema.models import Element
+
+#: Element ids are positional and name their own page: `page89_b1_l0`.
+PAGE_ID = re.compile(r"^page(\d+)_")
 
 #: A size must exceed body by this much to read as a heading.
 HEADING_RATIO = 1.15
@@ -60,6 +64,13 @@ MIN_LINES = 8
 #: Largest size becomes `title`, everything else above body a `section_header`.
 #: DocLayNet has no deeper heading class, so neither does this.
 TITLE, SECTION = "title", "section_header"
+
+def _first_page(element: Element) -> bool:
+    """Page 1, read off the element's own id. Unparseable ids are treated as
+    page 1, so an element built by hand in a test behaves as it reads."""
+    match = PAGE_ID.match(element.id or "")
+    return match is None or match.group(1) == "1"
+
 
 def _sizes(elements: List[Element]) -> List[float]:
     return [
@@ -104,6 +115,11 @@ def suggest(elements: List[Element]) -> List[Tuple[str, str]]:
     # A page has at most one title. Two lines sharing the largest size are two
     # section headings, not two titles — which is what `wiki_ar.pdf` p6 is.
     top = TITLE if sizes.count(largest) == 1 else SECTION
+    # And a document has at most one title, on its first page. The largest line
+    # on page 88 of a budget is a section heading however big it is; proposing
+    # `title` there was wrong on every interior page in the corpus.
+    if top == TITLE and not _first_page(candidates[0]):
+        top = SECTION
     return [
         (el.id, top if size == largest else SECTION)
         for el, size in zip(candidates, sizes)

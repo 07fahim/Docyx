@@ -639,6 +639,29 @@ def test_two_lines_at_the_largest_size_are_headings_not_two_titles(tmp_path):
     workspace.close()
 
 
+def test_the_biggest_line_on_an_interior_page_is_not_a_title(tmp_path):
+    """A document has one title and it is on page one.
+
+    `nasa_budget.pdf` p88 sets its program name larger than anything else on
+    the page, and proposing `title` there was wrong on every interior page in
+    the corpus. Found by scripts/measure_types.py, not by a reader.
+    """
+    doc = fitz.open()
+    for _ in range(2):
+        page = doc.new_page()
+        page.insert_text((72, 80), "Program Name In Large Type", fontsize=20)
+        for i in range(12):
+            page.insert_text((72, 120 + i * 20), f"body line {i} of ordinary prose", fontsize=10)
+    path = tmp_path / "interior.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    workspace = Workspace(str(path))
+    assert [s["type"] for s in workspace.suggest_headings(0)] == ["title"]
+    assert [s["type"] for s in workspace.suggest_headings(1)] == ["section_header"]
+    workspace.close()
+
+
 def test_a_suggestion_does_not_overwrite_a_human_or_a_model(tmp_path):
     """Both outrank a font-size guess."""
     doc = fitz.open()

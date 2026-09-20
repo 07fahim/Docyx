@@ -241,9 +241,45 @@ Figures are cropped by re-rendering the page rather than holding page images thr
 
 A form has no dominant body size, so "bigger than body" stops meaning "heading" and starts meaning "one of the other six sizes on this page". Below `MIN_BODY_SHARE` (0.8) it proposes nothing — the same rule the alignment code follows, where an absent value beats a wrong one.
 
-**A page has at most one title.** Two lines sharing the largest size are two section headings, which is exactly what `wiki_ar.pdf` p6 is; calling both `title` was the first version's bug.
+**A page has at most one title**, and **a document has one title, on page one**. Two lines sharing the largest size are two section headings, which is exactly what `wiki_ar.pdf` p6 is; calling both `title` was the first version's bug. The page rule is read off the element id (`page89_b1_l0`), and it is what stops `nasa_budget.pdf` p88 proposing a `title` on page 88 of a budget.
 
 The worry that drove the measurement — that Arabic and Bengali mark hierarchy by ornament rather than size — **did not hold**. Arabic scored 2/2 and Bengali 1/1. Forms are the failure mode, not scripts.
+
+**Everything above is precision, and precision alone was hiding the real defect** — see the next section.
+
+### The type scorer
+
+`analysis/headings.py` and the workspace's type control both shipped with nothing that could say whether their output is right, which is the exact trap the reading-order harness exists to avoid. `scripts/measure_types.py` closes it.
+
+```bash
+PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_types.py
+```
+
+Truth lives in `.corpus/truth/types/` and **shares its line inventory and checksum with the reading-order truth**, so labelling a page costs one `dump_lines.py` worksheet rather than two, and a change to extraction invalidates both together. A file records only the lines that are *not* plain text, because "everything is text" is precisely the baseline being measured.
+
+**Accuracy is not reported, deliberately.** 78% of the labelled lines are `text`, so answering `text` to everything — exactly what the pipeline does with no layout model — scores 0.78 and has found nothing. Per-class precision and recall against that baseline is the only reading that separates the two. 276 lines, 5 pages, 3 scripts:
+
+| class | n | bare P / R / F1 | suggested P / R / F1 |
+|---|---|---|---|
+| `title` | 2 | – / 0.00 | – / **0.00** |
+| `section_header` | 14 | – / 0.00 | 0.86 / 0.43 / **0.57** |
+| `caption` | 6 | – / 0.00 | – / 0.00 |
+| `page_header` | 5 | – / 0.00 | – / 0.00 |
+| `page_footer` | 4 | – / 0.00 | – / 0.00 |
+| `table` | 31 | – / 0.00 | – / 0.00 |
+| `text` | 214 | 0.78 / 1.00 / 0.87 | 0.80 / 1.00 / 0.89 |
+| **macro F1** | | **0.125** | **0.208** |
+
+**It found two defects on its first run**, both invisible to the table above it:
+
+- **`title` on an interior page.** `nasa_budget` p88 sets its program name larger than anything else and was proposed as a `title`. Fixed by the page-one rule; pinned by `test_the_biggest_line_on_an_interior_page_is_not_a_title`. That single change took `section_header` F1 from 0.33 to 0.57, because three pages were spending their largest line on a `title` that was really a section heading.
+- **The suggester's recall is 0.43, and nothing had ever measured it.** The modal-share table reports how many proposals were *correct* and never how many headings were *missed*. On the labelled set it finds 6 of 14.
+
+**`title` recall is 0.00, and that is `MIN_BODY_SHARE` working as designed.** `arxiv_bert.pdf` p0 proposes nothing at all: a title page sets its abstract in a different size from its body, so the modal share falls under 0.8 — the same gate that stops `irs_fw9` producing 15 wrong proposals. Title pages and forms look alike by this measure. **Do not loosen the threshold to chase the two title lines**; it is the form disaster that comes back, and the numbers for it are in the modal-share table above.
+
+`caption`, `page_header`, `page_footer` and `table` are all 0.00 under both predictors and there is no heuristic in the codebase that could move them. They are in the truth so that a future layout model has something to be graded against, and so that a heuristic which buys heading recall by mislabelling a caption is caught doing it.
+
+**5 pages is an instrument, not a benchmark** — the same caveat the reading-order harness carries, and here it is tighter: 2 title lines cannot support a claim about titles.
 
 ### Markdown export doubles as an evaluation instrument
 
