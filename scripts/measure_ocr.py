@@ -130,7 +130,7 @@ def main(pdf_path: str, page_num: int, lang: str) -> int:
     ).pages[0]
     recognised = page_text(scanned)
 
-    ratio = difflib.SequenceMatcher(None, normalise(native), normalise(recognised)).ratio()
+    ratio = matcher(normalise(native), normalise(recognised)).ratio()
     # Sequence similarity conflates "recognised the wrong characters" with
     # "recognised the right characters in a different order". On RTL pages
     # those are opposite verdicts, because the NATIVE layer is the one storing
@@ -188,6 +188,33 @@ def diagnose(overlap, ratio, confidences, reference_is_native: bool) -> None:
         print("\n  WARNING: high confidence, low overlap — the engine is confidently wrong")
 
 
+def matcher(a: str, b: str) -> difflib.SequenceMatcher:
+    """Character alignment, with difflib's autojunk heuristic turned OFF.
+
+    **This is not a detail, and leaving it on penalised exactly the scripts
+    this project exists for.** Past 200 elements `difflib` defaults to treating
+    any character occupying more than 1% of positions as junk and refuses to
+    anchor matches on it. That is tuned for source code, where a few
+    punctuation characters dominate. An abugida is the opposite case: dense
+    Bengali prose reuses `্ া র ে` in far more than 1% of positions, so the
+    most common letters on the page become unmatchable and the alignment
+    shatters into phantom "replace" blocks that are really the same text.
+
+    Measured on the three real scans, ON vs OFF:
+
+        Bengali prose (1688 chars)     CER 0.210 -> 0.048
+        Bengali form  (994 chars)      CER 0.075 -> 0.073
+        Latin         (488 chars)      CER 0.314 -> 0.225
+
+    A 4.4x overstatement on Bengali prose and almost none on the mixed-script
+    form, because the form's larger character inventory keeps fewer characters
+    above the 1% line. So the bias tracks *script density*, silently, and a
+    harness validated on Latin would never show it. `compare_tools.py` already
+    passed `autojunk=False`; this one did not, in all three of its call sites.
+    """
+    return difflib.SequenceMatcher(None, a, b, autojunk=False)
+
+
 def cer(reference: str, hypothesis: str) -> float:
     """Character error rate: edits per reference character, the OCR standard.
 
@@ -195,8 +222,7 @@ def cer(reference: str, hypothesis: str) -> float:
     similarity because a ratio of 0.9 sounds good and a CER of 0.10 does not,
     and the second framing is the one the literature uses.
     """
-    matches = sum(b.size for b in
-                  difflib.SequenceMatcher(None, reference, hypothesis).get_matching_blocks())
+    matches = sum(b.size for b in matcher(reference, hypothesis).get_matching_blocks())
     return (max(len(reference), len(hypothesis)) - matches) / max(len(reference), 1)
 
 
@@ -228,7 +254,7 @@ def against_truth(pdf_path: str, page_num: int, lang: str, truth_path: str) -> i
     recognised = normalise(page_text(page))
     reference = normalise(" ".join(truth["lines"]))
 
-    ratio = difflib.SequenceMatcher(None, reference, recognised).ratio()
+    ratio = matcher(reference, recognised).ratio()
     a = Counter(c for c in reference if not c.isspace())
     b = Counter(c for c in recognised if not c.isspace())
     overlap = sum((a & b).values()) / max(sum(a.values()), 1)

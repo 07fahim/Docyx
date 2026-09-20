@@ -110,6 +110,7 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/compare_tools.py               # v
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_speed.py               # wall clock
 PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_bidi.py                # RTL per producer
 PYTHONPATH=. .venv/Scripts/python.exe scripts/find_scanned_pages.py          # real scans on disk, by producer
+PYTHONPATH=. .venv/Scripts/python.exe scripts/fetch_scans.py ben 8         # grow the scan corpus, verified
 ```
 
 **What the harness does and does not establish** (audited; read before quoting a number):
@@ -435,11 +436,11 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/arxiv_atten
 | page | lang | native text layer | sequence | char overlap | mean conf |
 |---|---|---|---|---|---|
 | `arxiv_attention.pdf` p2 | eng | clean | 0.959 | 0.999 | 0.918 |
-| `wiki_bn.pdf` p5 | ben | clean | **0.987** | 0.986 | 0.926 |
-| `word_bn.pdf` p0 | ben | `COMBINING_MARK_ORDER` | 0.705 | 0.921 | 0.930 |
-| `wiki_ar.pdf` p6 | ara | `RTL_VISUAL_ORDER` | 0.140 | 0.928 | 0.829 |
+| `wiki_bn.pdf` p5 | ben | clean | **0.980** | 0.974 | 0.926 |
+| `word_bn.pdf` p0 | ben | `COMBINING_MARK_ORDER` | 0.775 | 0.914 | 0.929 |
+| `wiki_ar.pdf` p6 | ara | `RTL_VISUAL_ORDER` | 0.646 | 0.928 | 0.829 |
 
-**The two clean-reference rows are the control, and they are what make the other two readable.** Tesseract scores 0.959 and 0.987 where the text layer is trustworthy, so it is not a weak recogniser — which means the low sequence scores on rows 3 and 4 cannot be blamed on it. They are the *reference* being wrong:
+**The two clean-reference rows are the control, and they are what make the other two readable.** Tesseract scores 0.959 and 0.980 where the text layer is trustworthy, so it is not a weak recogniser — which means the low sequence scores on rows 3 and 4 cannot be blamed on it. They are the *reference* being wrong:
 
 - `word_bn.pdf` native reads `বাাংলাদেশ েক্ষিণ এক্ষশযার`; OCR reads `বাংলাদেশ দক্ষিণ এশিয়ার`, which is correct Bengali. Glyph order vs logical order.
 - `wiki_ar.pdf` native reads `م180-161(`; OCR reads `(180-161 م)`. Visual order vs logical order.
@@ -449,6 +450,30 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py .corpus/arxiv_atten
 `measure_ocr.py` therefore reports both metrics, and diagnoses a large gap between them as a reordering difference rather than a recognition failure.
 
 English is 0.959 rather than 1.0 because OCR additionally picks up figure labels that the native layer holds as vector art (`Output Probabilities Linear Nx Nx Positional…`), which is extra content, not an error.
+
+#### `autojunk` — a measurement bug that only hurt non-Latin scripts
+
+**Every sequence number above was wrong, and wrong by an amount that depended on the script.** `difflib.SequenceMatcher` defaults to `autojunk=True`: past 200 elements it treats any character occupying more than 1% of positions as junk and refuses to anchor matches on it. That heuristic is tuned for source code, where a handful of punctuation characters dominate. An abugida or an abjad is the opposite case — dense Bengali reuses `্ া র ে` and Arabic its two dozen letters in far more than 1% of positions, so **the most common letters on the page become unmatchable** and the alignment shatters into phantom `replace` blocks that are really the same text.
+
+Measured by scoring the *same* recognised output both ways, so nothing but the flag differs:
+
+| page | script | chars | ON | OFF | |
+|---|---|---|---|---|---|
+| `arxiv_attention` p2 | latin | 1826 | 0.959 | 0.959 | **+0.000** |
+| `real_81_annexure` p0 | bengali+latin | 994 | 0.954 | 0.956 | +0.002 |
+| `wiki_bn` p5 | bengali | 2132 | 0.978 | 0.980 | +0.002 |
+| `real_mou_signature` p13 | latin | 488 | 0.677 | 0.764 | +0.087 |
+| `word_bn` p0 | bengali | 900 | 0.700 | 0.775 | +0.075 |
+| `scan_ben_vol24` p10 | bengali | 1688 | 0.788 | 0.950 | +0.162 |
+| `wiki_ar` p6 | arabic | 3912 | 0.140 | **0.646** | **+0.506** |
+
+**Latin is the one row that does not move at all.** A harness validated on English would never have shown this, which is the same lesson the English-only corpus taught in phase 4, arriving this time in the *instrument* rather than the subject.
+
+Two documented findings were overstated by it. `wiki_ar.pdf` p6's **0.140 was mostly an artefact** — the real figure is 0.646. The conclusion it supported still holds, because 0.928 overlap against 0.646 sequence is still a large gap and still says visual order, but the magnitude was not evidence of anything. And the first real Bengali *prose* scan reads **CER 0.052 where the broken alignment said 0.214**, a 4x overstatement of the error rate on precisely the script this project exists for.
+
+**The damage is worst where there is already some error.** Two nearly perfect strings match in long contiguous runs and autojunk has little to spoil (`wiki_bn` p5, +0.002); scatter small errors through them and it can no longer re-anchor between them (`scan_ben_vol24`, +0.162). So it inflates hard pages and leaves easy ones alone — the opposite of a constant offset, and undetectable by spot-checking a good result.
+
+`matcher()` in [measure_ocr.py](scripts/measure_ocr.py) is now the single place the flag is set, and all three call sites route through it. `compare_tools.py` already passed `autojunk=False`; this harness never did. **Pass it explicitly in any new comparison** — the default is wrong for every script this project cares about.
 
 #### A real scan, finally
 
@@ -463,39 +488,44 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_ocr.py \
 
 | | |
 |---|---|
-| **CER** | **0.075** — 0.037 excluding the form's dotted leaders |
-| sequence similarity | 0.954 |
+| **CER** | **0.073** — 0.028 excluding the form's dotted leaders |
+| sequence similarity | 0.956 |
 | character overlap | 0.916 |
 | distinct Bengali glyphs recovered | **44 / 44** |
 | mean confidence | 0.898 |
 
-**Where the 79 edited characters actually are**, which is the part worth keeping:
+**Where the 77 edited characters actually are**, which is the part worth keeping:
 
-| | share of errors | share of page |
-|---|---|---|
-| dotted leaders (`..........` form blanks, collapsed to `...`) | 53% | 4.2% |
-| Bengali | 28% | 2.2% |
-| Latin | 14% | 1.1% |
-| danda `।` read as `|` or `৷` | 5% | 0.4% |
+| | share of errors |
+|---|---|
+| dotted leaders (`..........` form blanks, collapsed to `...`) | **71%** |
+| Bengali marks and letters | 15% |
+| danda `।` read as `\|` or `৷` | 3% |
+| everything else | 11% |
 
-**Over half the "error" is a form artifact, not recognition.** A row of leader dots is a blank to be filled in; collapsing it changes no meaning. Quote 0.037 for text and 0.075 for the literal page, and say which.
+**Most of the "error" is a form artifact, not recognition.** A row of leader dots is a blank to be filled in; collapsing it changes no meaning. Quote 0.028 for text and 0.073 for the literal page, and say which. (The shares here are recomputed with the corrected alignment — the earlier 53/28/14/5 split was measured through `autojunk` and attributed characters to phantom replace blocks.)
 
 The real misses are small and specific: `Particulars` read as `15` (a table header lost to the ruling beside it), and `ঃ` → `£ &`. **Bengali held up** — every distinct glyph on the page came back, which is the opposite of `word_bn.pdf`'s broken text layer where four characters were absent entirely.
 
 **The honest caveat on the reference:** it was transcribed from the rendered page and cross-checked at 1.8× on three crops. That is what a human annotator does, but it is one transcriber and one page, so treat it as a first real data point rather than a benchmark. The truth file carries the PDF's `sha256` and the harness refuses to score a different file.
 
-#### A second real scan, and what it proved about the metric
+#### Three real scans, and a corpus that can grow
 
-`scripts/find_scanned_pages.py` inventories every genuinely scanned page in the corpora — the gate decides, `has_images` decides `scanned` vs `empty`, so it cannot drift from the pipeline's own derivation, and nothing is rasterised. It found a second gradeable scan: **`.corpus/real/oct222013smespdl02_mou.pdf` p13**, a JICA/Bangladesh Bank MOU signature page, producer `Adobe Acrobat Pro 2020` — a different scanner pipeline from `81_Annexure-1.pdf`'s `SECnvtToPDF`, and Latin rather than Bengali, so it measures the pipeline rather than the script.
+`scripts/find_scanned_pages.py` inventories every genuinely scanned page in the corpora — the gate decides, `has_images` decides `scanned` vs `empty`, so it cannot drift from the pipeline's own derivation, and nothing is rasterised. Run on the original corpus it found exactly **two** gradeable scans in 1748 pages, which is why `scripts/fetch_scans.py` now exists: it pulls candidates from the Internet Archive and **deletes any download whose pages pass the gate**, because most Archive PDFs carry an OCR text layer the Archive added and grading a recogniser against another recogniser's output measures agreement, not accuracy.
 
-| | |
-|---|---|
-| character overlap | **0.988** |
-| CER | 0.340 |
-| sequence similarity | 0.677 |
-| mean confidence | 0.813 |
+That took the corpus from 8 pages classified `scanned` to **1877 across 10 producers**, Bengali and Arabic, from 7-year-old Acrobat image plug-ins to ABBYY. Downloads land in the gitignored `.corpus/scans/`; `PROVENANCE.json` records every Archive identifier so the set rebuilds.
 
-**Recognition is essentially perfect and the CER is 0.340 anyway.** Every one of those "errors" is reading order: the page is a two-column signature block whose four pairs interleave by `y`, so a column-wise reference and a row-wise recogniser agree on every character and disagree on where each belongs. This is the same float/column problem the reading-order harness measures, arriving inside the OCR score.
+| page | script | producer | CER | sequence | overlap |
+|---|---|---|---|---|---|
+| `real_81_annexure` p0 | bengali+latin, ruled form | `SECnvtToPDF` | **0.073** | 0.956 | 0.916 |
+| `scan_ben_vol24` p10 | bengali, continuous prose | `ABBYY FineReader 9.0` | **0.052** | 0.950 | 0.943 |
+| `real_mou_signature` p13 | latin, two-column | `Acrobat Pro 2020` | 0.252 | 0.764 | **0.988** |
+
+**`scan_ben_vol24` p10 is the one that matters most here** — a scanned Bengali novel page, the first real scan of continuous Bengali *prose* rather than a form, single-column so its sequence score needs no caveat. CER 0.052 with **46/46 distinct Bengali glyphs** recovered. Its residual errors are specific and worth knowing: the danda `।` read as `|`, typographic quotes substituted for straight ones, chandrabindu dropped (`সিঁড়ি` → `সিড়ি`, `হাঁটতে` → `হাটতে`), and **Tesseract occasionally emitting a Latin fragment where a Bengali word belongs** (`হ্যাঁ` → `Sl`, `ট্যাটনা` → `BBA`) — with `ben` alone, no `eng` in the language list.
+
+**The MOU page is the counter-example that makes the metric legible.** Recognition is essentially perfect (0.988 overlap) and the CER is 0.252 anyway: the page is a two-column signature block whose four pairs interleave by `y`, so a column-wise reference and a row-wise recogniser agree on every character and disagree on where each belongs. That is the reading-order problem arriving inside the OCR score.
+
+**Robustness, separately from accuracy:** 30 pages sampled across all 12 fetched documents, run with `--ocr`, **zero crashes**, median 1.6 s/page. Six recovered nothing, and all six are blank pages or photographed book covers — on the blanks the `--ocr-min-confidence` floor correctly rejected scanner speckle rather than returning it as text, which is the first time that guard has been demonstrated on real input rather than argued for.
 
 **And the harness did not say so.** The reordering diagnosis existed only on the flattened-page path; the `--truth` path — the one grading a real scanner, the only evidence here that is not a ceiling — printed a 0.31 gap between the two metrics with nothing saying which to believe, while CLAUDE.md claimed it diagnosed exactly that. `diagnose()` is now one function called from both, and it distinguishes the two causes: against a native reference the gap usually means visual order, and against a hand-typed one it cannot, so it points at the truth file's `caveat` instead.
 
@@ -609,7 +639,7 @@ So `analysis/headings.py` plus the manual control cover the same ground at a fra
 
 ### Known gaps
 
-- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **Two** real scans are now measured, across two producers and two scripts (CER 0.075 Bengali, character overlap 0.988 Latin — see above). `find_scanned_pages.py` says there is no third on disk: 1748 pages yield 8 classified `scanned` and 6 of those are cover art. Everything else is flattened born-digital, so skew and show-through remain largely unrepresented, and **growing this needs new documents rather than a new script**.
+- **Scanned PDFs need `--ocr`**; without the flag a scanned page still fails, by design. **Three** real scans are graded against hand-typed references, across three producers and two scripts (CER 0.073 / 0.052 Bengali, 0.252 Latin — see above), and the corpus behind them now holds **1877 scanned pages from 10 producers** rather than 8. The binding limit is no longer documents, it is **references**: a page is only gradeable once a human types it, so three is what one transcriber produced. `fetch_scans.py` grows the pool; transcription is what turns a page into evidence. Skew and show-through are now represented in the corpus but not yet in any graded page.
 - **Layout classification is a stub**: no `layout_region` is ever produced without an injected detector, and none ships. `TableAnalyzer` is the same seam and *does* have a working detector, so the pattern is proven rather than speculative. Tables additionally have a model-free path (**Tables with no model**); layout does not, and the measured failure of `DocLayNetDetector` on captions says a model is not obviously the answer there either.
 - `figure` detection is a contour heuristic. Dense text used to be misreported as figures (434 of them in a 114-page RFC); a component-density filter now rejects candidates that fragment like text. Inject a real figure head via `detector` when precision matters.
 - `visual_inference` provenance is unused, and the obvious producer was measured and declined — see below.
